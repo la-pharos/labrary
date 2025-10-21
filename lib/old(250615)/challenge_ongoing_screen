@@ -1,0 +1,1457 @@
+import 'package:flutter/material.dart';
+import 'package:dayverse_book/main.dart';
+import 'package:dayverse_book/model/challenge_model.dart';
+import 'package:dayverse_book/model/book_model.dart';
+import 'package:dayverse_book/old(250615)/challenge_provider.dart';
+import 'package:dayverse_book/service/challenge_record_service.dart';
+import 'package:dayverse_book/service/reading_log_service.dart';
+import 'package:dayverse_book/service/book_api_service.dart';
+import 'package:dayverse_book/utils/challenge_progress_utils.dart';
+import 'package:dayverse_book/utils/challenge_check_utils.dart';
+import 'package:dayverse_book/utils/challenge_stage_utils.dart';
+import 'package:dayverse_book/screen/challenge_screen.dart';
+import 'package:dayverse_book/old(250615)/challenge_edit_screen.dart';
+import 'package:dayverse_book/screen/challenge_done_screen.dart';
+import 'package:dayverse_book/screen/challenge_action_screen.dart';
+import 'package:dayverse_book/provider/saved_books_provider.dart';
+import 'package:provider/provider.dart';
+import 'package:dayverse_book/utils/book_utils.dart';
+import 'package:dayverse_book/constants/dummy_book_list.dart';
+import 'package:dayverse_book/provider/custom_library_provider.dart';
+import 'package:dayverse_book/widget//book_search_dialog.dart';
+
+class ChallengeOngoingScreen extends StatefulWidget {
+  final Challenge challenge; // 현재 챌린지 정보
+
+  const ChallengeOngoingScreen({super.key, required this.challenge});
+
+  @override
+  State<ChallengeOngoingScreen> createState() => _ChallengeOngoingScreenState();
+}
+
+class _ChallengeOngoingScreenState extends State<ChallengeOngoingScreen> {
+  Map<String, dynamic> recordData = {}; // FireStore에서 불러온 기록 데이터
+  Map<String, dynamic> _routineChecks = {};
+  List<BookModel> editedBooks = [];
+  List<BookModel> searchResults = [];
+  List<BookModel> detailedRequiredBooks = [];
+
+  final TextEditingController searchController = TextEditingController();
+  late Challenge _currentChallenge;
+
+  late DateTime today;
+  late DateTime currentMonth;
+
+  DateTime? routineStart;
+  int routineDays = 0;
+  double progress = 0.0;
+  int completed = 0;
+  int total = 0;
+  int remainingDays = 0;
+
+  bool showDetails = false;
+  bool isEditing = false;
+
+  late Future<Map<String, dynamic>> _recordDataFuture;
+
+  bool isSameDate(DateTime a, DateTime b) {return a.year == b.year && a.month == b.month && a.day == b.day;}
+
+  bool isTodaySuccess = false;
+
+  String _twoDigits(int n) => n.toString().padLeft(2, '0');
+
+  late Map<String, int> dailyMinutesMap = {}; // ✅ 날짜별 독서 시간 로드 메서드
+
+  late int stageIndex; // ✅ 현재 시도 중인 스테이지 인덱스
+
+  @override
+  void initState() {
+    super.initState();
+    debugPrint("[✅ initState 진입 확인]");
+
+    final challengeProvider = Provider.of<ChallengeProvider>(context, listen: false);
+    final updated = challengeProvider.findChallengeById(widget.challenge.id);
+    _currentChallenge = updated ?? widget.challenge;
+
+    // ✅ 현재 날짜
+    today = DateTime.now().toLocal();
+    currentMonth = DateTime(today.year, today.month);
+
+    // ✅ 현재 시도 중인 스테이지 인덱스 파악
+    stageIndex = _currentChallenge.attempts.isNotEmpty
+        ? (_currentChallenge.attempts.last.stageIndex ?? 0)
+        : 0;
+
+    // ✅ 참여 도서 목록 초기화
+    if (_currentChallenge.method != ChallengeMethod.specificBooks ||
+        _currentChallenge.specificBookMode == SpecificBookMode.userDefined) {
+      editedBooks = [..._currentChallenge.participatingBooks ?? []];
+    }
+
+    // ✅ 기록 로딩
+    _recordDataFuture = ChallengeRecordService.fetchChallengeRecord(_currentChallenge.id);
+    print("[🐌 LOAD RECORD CALLED] ${DateTime.now()}");
+    _loadRecord();
+
+    // ✅ 시스템 정의 책 불러오기
+    _loadRequiredBooks();
+  }
+
+  Future<void> _loadRecord() async {
+    debugPrint("[🚨 _loadRecord 시작됨]");
+
+    final savedBooksProvider = Provider.of<SavedBooksProvider>(context, listen: false);
+    final savedBooks = savedBooksProvider.savedBooks;
+    final todayKey = "${today.year}-${_twoDigits(today.month)}-${_twoDigits(today.day)}";
+
+    /// 📦 1. 전체 기록 로드
+    final data = await ChallengeRecordService.fetchChallengeRecord(_currentChallenge.id);
+    recordData = Map<String, dynamic>.from(data ?? {});
+
+    /// ✅ 1-1. stageIndex 파싱
+    int stageIndex = 0;
+    final rawIndex = recordData['stageIndex'];
+    stageIndex = (rawIndex is int) ? rawIndex : int.tryParse(rawIndex?.toString() ?? '0') ?? 0;
+    stageIndex = _currentChallenge.stageDurations.isNotEmpty
+        ? stageIndex.clamp(0, _currentChallenge.stageDurations.length - 1)
+        : 0;
+    recordData['stageIndex'] = stageIndex;
+
+    /// ✅ 1-2. 해당 스테이지 전용 데이터 추출
+    final checkType = getChallengeCheckActionType(_currentChallenge);
+    final stageKey = "stage_$stageIndex";
+
+    final rawStage = recordData[stageKey];
+    final stageData = (rawStage is Map)
+        ? rawStage.map((key, value) => MapEntry(key.toString(), value))
+        : <String, dynamic>{};
+
+    debugPrint("[📦 stageData] $stageData");
+
+    /// ⏱️ 2. 오늘 읽은 시간
+    final todayMinutes = await ReadingLogService.getTodayTotalMinutes();
+    debugPrint("[DEBUG🔥오늘 총 읽은 시간] todayMinutes: $todayMinutes");
+
+    /// ✅ 3. dailyMinutes 처리 (스테이지별)
+    final rawMinutes = stageData['dailyMinutes'];
+    dailyMinutesMap = (rawMinutes is Map)
+        ? rawMinutes.map((k, v) => MapEntry(k.toString(), int.tryParse(v.toString()) ?? 0))
+        : {};
+    dailyMinutesMap[todayKey] = todayMinutes;
+    stageData['dailyMinutes'] = dailyMinutesMap;
+
+    stageData['stageIndex'] = stageIndex;
+    recordData[stageKey] = stageData;
+    recordData['stageIndex'] = stageIndex;
+    recordData['dailyMinutes'] = dailyMinutesMap;       // UI 계산에 필요
+    recordData['routineChecks'] = _routineChecks;       // 수동형 UI 계산에 필요
+
+    /// 📈 4. 진행률 계산
+    dynamic progressSource;
+    if (checkType == ChallengeCheckActionType.libraryAuto) {
+      progressSource = savedBooks;
+    } else {
+      progressSource = stageData;
+    }
+
+    final calculatedProgress = ChallengeProgressUtils.getProgress(_currentChallenge, progressSource, stageIndex);
+    final completedCount = ChallengeProgressUtils.getCompletedCount(_currentChallenge, progressSource, stageIndex);
+    final targetCount = ChallengeProgressUtils.getTargetCount(_currentChallenge, progressSource, stageIndex);
+
+    /// 🗓️ 5. 시작일 계산
+    DateTime effectiveStart;
+    final recordStartStr = stageData['routineStartDate']?.toString();
+    final recordStartDate = recordStartStr != null ? DateTime.tryParse(recordStartStr)?.toLocal() : null;
+    effectiveStart = recordStartDate ?? _currentChallenge.startDate?.toLocal() ?? DateTime.now().toLocal();
+
+    /// 📚 6. 참여 도서 보강
+    final List<BookModel> updatedBooks = [];
+    for (var book in _currentChallenge.participatingBooks ?? []) {
+      BookModel updated = book;
+
+      // 6-1. pageCount 보완
+      if ((book.pageCount ?? 0) == 0 && book.itemId != null) {
+        final fetched = await BookApiService.fetchBookDetail(book.itemId!);
+        if (fetched != null && fetched.pageCount > 0) {
+          updated = fetched.copyWith(
+            category: book.category,
+            startDate: book.startDate,
+          );
+          savedBooksProvider.addOrUpdateBook(updated);
+        }
+      }
+
+      /// 6-2. savedBooks 최신화
+      final matched = savedBooks.firstWhere((b) => b.id == book.id, orElse: () => updated);
+      updated = updated.copyWith(
+        pageRead: matched.pageRead,
+        pageCount: matched.pageCount,
+      );
+
+      updatedBooks.add(updated);
+    }
+
+    /// ✅ 7. 상태 반영
+    setState(() {
+      _currentChallenge = _currentChallenge.copyWith(participatingBooks: updatedBooks);
+      routineStart = (_currentChallenge.type == ChallengeType.routine) ? effectiveStart : null;
+      routineDays = targetCount;
+      remainingDays = ChallengeProgressUtils.calculateRemainingDays(_currentChallenge, today, stageData, stageIndex);
+      progress = calculatedProgress;
+      completed = completedCount;
+      total = targetCount;
+
+      _routineChecks = Map<String, dynamic>.from(stageData['routineChecks'] ?? {});
+      isTodaySuccess = (checkType == ChallengeCheckActionType.timerAuto)
+          ? todayMinutes >= (_currentChallenge.requiredMinutes ?? 0)
+          : (_routineChecks[todayKey] == true);
+
+      // ✅ 스테이지 데이터 저장
+      recordData[stageKey] = stageData;
+      recordData['stageIndex'] = stageIndex;
+    });
+
+    /// 🔁 Firestore에서 책 다시 불러오기
+    await savedBooksProvider.reloadFromFirestore();
+
+    /// ✅ 최신 챌린지 데이터 반영
+    final latest = Provider.of<ChallengeProvider>(context, listen: false)
+        .findChallengeById(_currentChallenge.id);
+    if (latest != null) {
+      setState(() {
+        _currentChallenge = latest.copyWith(participatingBooks: updatedBooks);
+      });
+    }
+  }
+
+  Future<void> _loadRequiredBooks() async {
+    if (_currentChallenge.specificBookMode == SpecificBookMode.systemDefined &&
+        _currentChallenge.requiredBooks != null) {
+      final result = await fetchRequiredBooksFromApi(_currentChallenge.requiredBooks!);
+
+      final savedBooks = Provider.of<SavedBooksProvider>(context, listen: false).savedBooks;
+
+      // ✅ savedBooks의 pageRead, pageCount를 병합
+      final withProgress = result.map((book) {
+        final matched = savedBooks.firstWhere(
+              (b) => b.id == book.id,
+          orElse: () => book,
+        );
+        return book.copyWith(
+          pageRead: matched.pageRead,
+          pageCount: (book.pageCount ?? 0) > 0 ? book.pageCount : matched.pageCount,
+        );
+      }).toList();
+
+      setState(() {
+        detailedRequiredBooks = withProgress;
+      });
+    }
+  }
+
+  AlertDialog _buildSuccessDialog() {
+    return AlertDialog(
+      backgroundColor: Colors.greenAccent,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      content: IntrinsicWidth(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: const [
+            Text("✨", style: TextStyle(fontSize: 36)),
+            SizedBox(height: 12),
+            Text(
+              "오늘의 루틴 완료!\n꾸준함이 빛을 만듭니다 💪",
+              textAlign: TextAlign.center,
+              style:
+                  TextStyle(fontFamily: 'Kopub', fontWeight: FontWeight.w600),
+            ),
+            SizedBox(height: 8),
+            Text("응원합니다 🌟", textAlign: TextAlign.center),
+          ],
+        ),
+      ),
+    );
+  }
+
+  AlertDialog _buildCompletionDialogContent(Challenge updatedChallenge) {
+    return AlertDialog(
+      backgroundColor: Colors.greenAccent,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      content: IntrinsicWidth(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text("🏆", style: TextStyle(fontSize: 48)),
+            const SizedBox(height: 12),
+            Text(
+              "'${updatedChallenge.title}'\n챌린지 달성 완료!",
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontFamily: 'Kopub',
+                fontWeight: FontWeight.bold,
+                fontSize: 18,
+                color: Colors.black,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              "멋진 도전을 완수하셨습니다 👏\n당신의 꾸준함에 박수를 보냅니다!",
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.black87,
+                fontFamily: 'Kopub',
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void onSearchChanged(String keyword) {
+    setState(() {
+      searchResults = dummyBooks
+          .where((book) =>
+      book.title.toLowerCase().contains(keyword.toLowerCase()) ||
+          book.author.toLowerCase().contains(keyword.toLowerCase()))
+          .toList(); // 그대로 BookModel 리스트로 저장
+    });
+  }
+
+  void onBookSelected(BookModel selectedBook) async {
+    final bookId = selectedBook.id;
+    final savedBooksProvider = Provider.of<SavedBooksProvider>(context, listen: false);
+    final now = widget.challenge.startDate ?? DateTime.now();
+
+    final participatingBooks = widget.challenge.participatingBooks ?? [];
+
+    final alreadyExists = participatingBooks.any((b) => b.id == bookId);
+    if (alreadyExists) return;
+
+    BookModel finalBook = selectedBook;
+
+    // ✅ pageCount가 0이면 API 상세 조회
+    if ((selectedBook.pageCount ?? 0) == 0 && selectedBook.itemId != null) {
+      final fetchedDetail = await BookApiService.fetchBookDetail(selectedBook.itemId!);
+      if (fetchedDetail != null) {
+        finalBook = fetchedDetail.copyWith(
+          category: 'reading',
+          startDate: now,
+        );
+      }
+    } else {
+      // ✅ 그냥 기본 등록
+      finalBook = selectedBook.copyWith(
+        category: 'reading',
+        startDate: now,
+      );
+    }
+
+    // ✅ Provider에 저장
+    savedBooksProvider.addOrUpdateBook(finalBook);
+
+    // ✅ 참여 도서에 추가
+    setState(() {
+      participatingBooks.add(finalBook);
+      searchResults = [];
+      searchController.clear();
+    });
+  }
+
+  void onBookRemoved(Map<String, String> book) {
+    setState(() {
+      widget.challenge.participatingBooks?.remove(book);
+    });
+  }
+
+
+  @override
+  Widget build(BuildContext context) {
+    final challengeProvider = Provider.of<ChallengeProvider>(context);
+    final savedBooks = Provider.of<SavedBooksProvider>(context).savedBooks;
+
+    // 🔥 최신 상태로 덮어쓰기
+    final latestChallenge = challengeProvider.findChallengeById(_currentChallenge.id);
+    if (latestChallenge != null && latestChallenge != _currentChallenge) {
+      _currentChallenge = latestChallenge;
+    }
+
+    // ✅ 이후 모든 코드는 이걸 기준으로 동작
+    final challenge = _currentChallenge;
+
+    // ✅ 시간 제한 확인 추가
+    final bool isWithinTime = isWithinAllowedTime(challenge);
+    final bool showTimeWarning = challenge.allowedStartTime != null && challenge.allowedEndTime != null;
+
+    // ✅ 도전 시작 전 상태 계산
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
+    final isBeforeStart = (() {
+      if (challenge.period == ChallengePeriod.periodBased) {
+        final start = challenge.startDate?.toLocal();
+        return start != null && today.isBefore(start);
+      }
+      return false;
+    })();
+
+    final isRoutineAndTodayDone = _currentChallenge.type == ChallengeType.routine && isTodaySuccess;
+
+    final ChallengeCheckActionType checkAction = getChallengeCheckActionType(challenge);
+
+    // ✅ progressSource: 타입 안전하게 분기
+    // 🧠 1. stageData 준비
+    final int stageIndex = recordData['stageIndex'] is int
+        ? recordData['stageIndex']
+        : int.tryParse(recordData['stageIndex']?.toString() ?? '0') ?? 0;
+    final stageKey = 'stage_$stageIndex';
+    final stageData = recordData[stageKey] is Map
+        ? Map<String, dynamic>.from(recordData[stageKey])
+        : <String, dynamic>{};
+
+    // 📌 2. 분기 source
+    final progressSource = (checkAction == ChallengeCheckActionType.libraryAuto)
+        ? savedBooks
+        : stageData;
+
+    // ✅ 로그 출력 (디버깅)
+    debugPrint("[DEBUG] recordData: $recordData");
+    debugPrint("[DEBUG] isTodaySuccess: $isTodaySuccess");
+    debugPrint("[DEBUG] progressSource: $progressSource");
+
+    // ✅ 기록 섹션 분기 (루틴 챌린지만)
+    // 📌 3. 기록용 calendar 및 카드에 전달
+    final recordSection = (challenge.type == ChallengeType.routine &&
+        (checkAction == ChallengeCheckActionType.manual || checkAction == ChallengeCheckActionType.timerAuto))
+        ? buildRoutineProgressCalendar(challenge, stageData)
+        : null;
+
+    // ✅ remaining 계산
+    int remaining = 0;
+    if (challenge.period == ChallengePeriod.daysBased &&
+        challenge.type == ChallengeType.routine &&
+        routineStart != null &&
+        routineDays > 0) {
+      remaining = routineStart!
+          .add(Duration(days: routineDays))
+          .difference(today)
+          .inDays;
+    } else if (challenge.period == ChallengePeriod.daysBased &&
+        routineDays > 0) {
+      final effectiveStart = challenge.startDate?.toLocal() ?? today;
+      remaining = effectiveStart
+          .add(Duration(days: routineDays))
+          .difference(today)
+          .inDays;
+    } else if (challenge.period == ChallengePeriod.periodBased && challenge.endDate != null) {
+      remaining = challenge.endDate!.toLocal().difference(today).inDays + 1;
+    }
+
+    // ✅ remaining 음수 방지
+    if (remaining < 0) remaining = 0;
+
+    return GestureDetector(
+      onHorizontalDragUpdate: (details) {
+        if (details.delta.dx > 20) {
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (_) => const MainScreen(initialTabIndex: 2)),
+                (route) => false,
+          );
+        }
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFF013328),
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.white),
+            onPressed: () {
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(
+                    builder: (_) => const MainScreen(initialTabIndex: 2)),
+                (route) => false,
+              );
+            },
+          ),
+          centerTitle: true,
+          title: Text(
+            challenge.title,
+            style: const TextStyle(color: Colors.white, fontFamily: 'kopub'),
+          ),
+          actions: [
+            if (challenge.isCustom)
+              IconButton(
+                icon: const Icon(Icons.edit, color: Colors.white),
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) =>
+                            ChallengeEditScreen(challenge: challenge)),
+                  );
+                },
+              ),
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert, color: Colors.white),
+              onSelected: (value) {
+                if (value == 'give_up') {
+                  showGiveUpDialog(context);
+                }
+              },
+              itemBuilder: (BuildContext context) => [
+                const PopupMenuItem<String>(
+                  value: 'give_up',
+                  child: Text('챌린지 포기하기'),
+                ),
+              ],
+            ),
+          ],
+        ),
+        body: Stack(
+          children: [
+            SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildImage(challenge.imageUrl, context),
+                  const SizedBox(height: 20),
+                  const Divider(color: Colors.white24),
+                  const SizedBox(height: 10),
+                  Text(
+                    challenge.title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontFamily: 'kopub',
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  _buildStageInfoCard(challenge, recordData['stageIndex'] ?? 0),
+                  const SizedBox(height: 16),
+                  _buildProgressCard(challenge, progressSource),
+                  const SizedBox(height: 20),
+
+                  // ✅ 리뉴얼된 기록 섹션 출력
+                  if (recordSection != null) recordSection,
+
+                  const SizedBox(height: 16),
+
+                  if (challenge.method == ChallengeMethod.specificBooks) ...[
+                    _buildReadingBookSection(challenge, savedBooks),
+                    const SizedBox(height: 16),
+                  ],
+
+                  const Divider(color: Colors.white24),
+                  const SizedBox(height: 16),
+                  _buildSummaryCard(challenge),
+                  const SizedBox(height: 10),
+
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      style: TextButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      onPressed: () {
+                        setState(() {
+                          showDetails = !showDetails;
+                        });
+                      },
+                      icon: Text(
+                        showDetails ? "챌린지 상세내용 접기" : "📂 챌린지 상세보기",
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontFamily: 'kopub',
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      label: Icon(
+                        showDetails ? Icons.expand_less : Icons.expand_more,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                  AnimatedCrossFade(
+                    duration: const Duration(milliseconds: 300),
+                    crossFadeState: showDetails
+                        ? CrossFadeState.showFirst
+                        : CrossFadeState.showSecond,
+                    firstChild: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (challenge.longDescription?.isNotEmpty == true)
+                          _buildDescriptionSection(
+                              "📖 챌린지 소개", challenge.longDescription!),
+                        if (challenge.goalDescription?.isNotEmpty == true)
+                          _buildDescriptionSection(
+                              "🎯 챌린지 목표", challenge.goalDescription!),
+                        if (challenge.recommendedFor?.isNotEmpty == true)
+                          _buildDescriptionSection(
+                              "🙋 이런 분께 추천", challenge.recommendedFor!),
+                        if (challenge.guideText?.isNotEmpty == true)
+                          _buildDescriptionSection(
+                              "📌 진행 방법", challenge.guideText!),
+                      ],
+                    ),
+                    secondChild: const SizedBox.shrink(),
+                  ),
+                  const SizedBox(height: 100),
+                ],
+              ),
+            ),
+            if (_currentChallenge.method != ChallengeMethod.quantityBased)
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 40.0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (showTimeWarning)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8.0),
+                          child: Text(
+                            "이 챌린지는 ${challenge.allowedStartTime!.format(context)} ~ ${challenge.allowedEndTime!.format(context)} 사이에만 참여할 수 있어요.",
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 13,
+                              fontFamily: 'kopub',
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      SizedBox(
+                        width: MediaQuery.of(context).size.width * 0.9,
+                        child: ElevatedButton(
+                          onPressed: (isBeforeStart || isRoutineAndTodayDone || !isWithinTime)
+                              ? null
+                              : _handleDailyCheckAction,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.redAccent,
+                            disabledBackgroundColor: Colors.redAccent.withOpacity(0.5),
+                            padding: const EdgeInsets.symmetric(vertical: 18),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                          ),
+                          child: Text(
+                            isBeforeStart
+                                ? "도전 시작 전입니다"
+                                : isRoutineAndTodayDone
+                                ? "오늘은 이미 성공 ✨"
+                                : !isWithinTime
+                                ? "지금은 도전 시간이 아닙니다"
+                                : "오늘의 도전 시작하기",
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontFamily: 'kopub',
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildImage(String imageUrl, BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: Image.asset(
+        imageUrl,
+        width: screenWidth,
+        height: screenWidth * 1, // 여기 비율 조절 가능 (0.5 ~ 0.6 추천)
+        fit: BoxFit.cover,
+        alignment: Alignment.bottomCenter,
+        errorBuilder: (_, __, ___) => Container(
+          width: screenWidth,
+          height: screenWidth * 0.3, // 오류 시에도 비율 기반
+          color: Colors.grey,
+          child: const Icon(Icons.flag, color: Colors.white, size: 50),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStageInfoCard(Challenge challenge, int stageIndex) {
+    if (!challenge.isStaged || challenge.stageDurations.isEmpty) return const SizedBox.shrink();
+
+
+    final clampedIndex = stageIndex.clamp(0, challenge.stageDurations.length - 1);
+    final currentDuration = challenge.stageDurations[clampedIndex];
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white10,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: Colors.amberAccent,
+          width: 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            "📈 현재 스테이지: [${clampedIndex + 1}단계] - $currentDuration일 루틴",
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontFamily: 'kopub',
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// ✅ 진행도 카드 위젯
+  Widget _buildProgressCard(Challenge challenge, dynamic source) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
+    final isBeforeStart = challenge.period == ChallengePeriod.periodBased &&
+        challenge.startDate != null &&
+        today.isBefore(challenge.startDate!.toLocal());
+
+    if (isBeforeStart) {
+      final dDay = challenge.startDate!.toLocal().difference(today).inDays;
+      return _buildBeforeStartCard(dDay);
+    }
+
+    final checkType = getChallengeCheckActionType(challenge);
+
+    // ✅ stageIndex 파싱 (source가 Map일 때만)
+    int stageIndex = 0;
+    if (source is Map<String, dynamic> && source['stageIndex'] != null) {
+      final raw = source['stageIndex'];
+      stageIndex = (raw is int) ? raw : int.tryParse(raw.toString()) ?? 0;
+    } else if (challenge.attempts.isNotEmpty) {
+      // Fallback: ChallengeAttempt에서 가져오기
+      final latest = challenge.attempts.last;
+      if (latest.stageIndex != null) {
+        stageIndex = latest.stageIndex!;
+      }
+    }
+
+    // ✅ 범위 보정
+    stageIndex = challenge.stageDurations.isNotEmpty
+        ? stageIndex.clamp(0, challenge.stageDurations.length - 1)
+        : 0;
+
+    // ✅ 진행률 계산
+    final int targetCount = ChallengeProgressUtils.getTargetCount(challenge, source, stageIndex);
+    final int completed = ChallengeProgressUtils.getCompletedCount(challenge, source, stageIndex);
+    final double progress = ChallengeProgressUtils.getProgress(challenge, source, stageIndex);
+    final int percentage = (progress * 100).toInt();
+    final int remainingDays = ChallengeProgressUtils.calculateRemainingDays(challenge, today, source is Map<String, dynamic> ? source : {}, stageIndex);
+
+    final String unit = _getUnitForChallenge(challenge, checkType);
+
+    if (challenge.period == ChallengePeriod.infinite) {
+      return _buildProgressContainer(
+        "🔄 언제든지 자유롭게 도전할 수 있어요!",
+        progress,
+        completed,
+        targetCount,
+        percentage,
+        unit,
+      );
+    }
+
+    if (remainingDays < 0) {
+      final dDay = -remainingDays;
+      return _buildBeforeStartCard(dDay);
+    }
+
+    final statusText = remainingDays == 0
+        ? "⏳ 오늘이 마지막 날이에요!"
+        : "⏳ 종료까지 D-$remainingDays";
+
+    return _buildProgressContainer(
+      statusText,
+      progress,
+      completed,
+      targetCount,
+      percentage,
+      unit,
+    );
+  }
+  String _getUnitForChallenge(Challenge challenge, ChallengeCheckActionType checkType) {
+    if (challenge.method == ChallengeMethod.specificBooks) return "권";
+    switch (checkType) {
+      case ChallengeCheckActionType.pageAuto:
+        return "페이지";
+      case ChallengeCheckActionType.timerAuto:
+      case ChallengeCheckActionType.manual:
+        return "회";
+      case ChallengeCheckActionType.libraryAuto:
+        return "권";
+      case ChallengeCheckActionType.none:
+      default:
+        return "-";
+    }
+  }
+
+  Widget _buildProgressContainer(String statusText, double progress, int completed, int targetCount, int percentage, String unit, {String? extraText}) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+          color: Colors.white10, borderRadius: BorderRadius.circular(12)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(statusText,
+              style: const TextStyle(fontSize: 16, color: Colors.amberAccent, fontFamily: 'kopub',fontWeight: FontWeight.bold)),
+          if (extraText != null) ...[
+            const SizedBox(height: 4),
+            Text(extraText, style: const TextStyle(color: Colors.white70, fontFamily: 'kopub')),
+          ],
+          const SizedBox(height: 10),
+          LinearProgressIndicator(
+            value: progress,
+            backgroundColor: Colors.white10,
+            color: Colors.amberAccent,
+            minHeight: 8,
+          ),
+          const SizedBox(height: 12),
+          Text("$percentage% 완료  ($completed / $targetCount $unit)",
+            style: const  TextStyle(color: Colors.white, fontFamily: 'kopub', fontSize: 15),),
+        ],
+      ),
+    );
+  }
+
+  /// ✅ 도전 시작 전 안내 카드 위젯
+  Widget _buildBeforeStartCard(int dDay) {
+    final isToday = dDay == 0;
+    final titleText = isToday ? "🚀 오늘부터 도전 시작!" : "🚀 도전 시작까지 D-$dDay";
+    final subtitleText = isToday ? "지금 바로 시작해보세요!" : "아직 도전이 시작되지 않았어요!";
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white10,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(titleText,
+              style: const TextStyle(
+                color: Colors.amberAccent,
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                fontFamily: 'kopub',
+              )),
+          const SizedBox(height: 10),
+          const LinearProgressIndicator(
+            value: 0.0,
+            backgroundColor: Colors.white24,
+            valueColor: AlwaysStoppedAnimation<Color>(Colors.grey),
+            minHeight: 8,
+          ),
+          const SizedBox(height: 12),
+          Text(subtitleText,
+              style: const TextStyle(
+                color: Colors.white,
+                fontFamily: 'kopub',
+                fontSize: 15,
+              )),
+        ],
+      ),
+    );
+  }
+
+  /// ✅ 정보 카드 위젯 (디자인 유지)
+  Widget _buildInfoCard(String title, String value) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+          color: Colors.white10, borderRadius: BorderRadius.circular(12)),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(title,
+              style: const TextStyle(
+                  color: Colors.white70,
+                  fontFamily: 'kopub',
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold)),
+          Flexible(
+            child: Text(value,
+                textAlign: TextAlign.right,
+                style: const TextStyle(
+                    color: Colors.white, fontFamily: 'kopub', fontSize: 16)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// ✅ 오늘의 도전 시작하기 버튼 함수
+  void _handleDailyCheckAction() {
+    final challenge = _currentChallenge;
+    final checkType = getChallengeCheckActionType(challenge);
+
+    if (isTodaySuccess == true) {
+      _showSnackBar("오늘은 이미 완료된 도전이에요!");
+      return;
+    }
+
+    switch (checkType) {
+      case ChallengeCheckActionType.manual:
+        _confirmManualRoutineCheck();
+        break;
+      case ChallengeCheckActionType.timerAuto:
+      case ChallengeCheckActionType.pageAuto:
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ChallengeActionScreen(
+              challenge: challenge,
+              checkType: checkType,
+              onSuccess: (_) => _handleCheckSuccess(),
+            ),
+          ),
+        );
+        break;
+      default:
+        _showSnackBar("이 챌린지는 별도의 체크가 필요하지 않아요.");
+    }
+  }
+
+  void _showSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.black87,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  Future<void> _handleCheckSuccess() async {
+    final provider = Provider.of<ChallengeProvider>(context, listen: false);
+
+
+    // 1. Firestore 상태 갱신 및 기록 로드
+    await provider.refreshChallengeStatus(_currentChallenge.id);
+    recordData = await ChallengeRecordService.fetchChallengeRecord(_currentChallenge.id);
+    dailyMinutesMap = await ReadingLogService.getTotalReadingMinutesByDate();
+    debugPrint("[🎯 _handleCheckSuccess → _loadRecord 호출]");
+    await _loadRecord();
+
+    // 2. 최신 챌린지 로드
+    final updated = provider.findChallengeById(_currentChallenge.id);
+    if (updated == null) {
+      debugPrint("[❌ Challenge 로드 실패] ID: ${_currentChallenge.id}");
+      return;
+    }
+
+    debugPrint("[📄 기존 attempts 갯수: ${updated.attempts.length}]");
+    for (final a in updated.attempts) {
+      debugPrint("→ start: ${a.startDate}, end: ${a.endDate}, success: ${a.isSuccessful}");
+    }
+
+    // ✅ 오늘 루틴 성공 다이얼로그
+    if (context.mounted) {
+      await showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) {
+          Future.delayed(const Duration(milliseconds: 1500), () {
+            if (context.mounted) Navigator.of(context).pop();
+          });
+          return _buildSuccessDialog();
+        },
+      );
+    }
+
+    await Future.delayed(const Duration(milliseconds: 300));
+
+    // 3. 전체 챌린지 성공 여부 판단
+    final checkAction = getChallengeCheckActionType(updated);
+    final dynamic progressSource = checkAction == ChallengeCheckActionType.libraryAuto
+        ? Provider.of<SavedBooksProvider>(context, listen: false).savedBooks
+        : recordData ?? <String, dynamic>{};
+
+    final isCompleted = ChallengeProgressUtils.isChallengeCompleted(updated, progressSource);
+    debugPrint("[🔎 체크 완료 여부 판단 결과] isCompleted: $isCompleted");
+
+    if (isCompleted) {
+      final updatedChallenge = await provider.markChallengeAsCompleted(updated);
+      debugPrint("[✅ markChallengeAsCompleted 처리 완료]");
+
+      // ✅ 전체 챌린지 최신화
+      await provider.refreshAllChallenges();
+
+      // ✅ 축하 다이얼로그 및 완료 화면 이동
+      if (context.mounted) {
+        await showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) {
+            Future.delayed(const Duration(milliseconds: 1500), () {
+              if (context.mounted) Navigator.of(context).pop();
+            });
+            return _buildCompletionDialogContent(updatedChallenge);
+          },
+        );
+
+        await Future.delayed(const Duration(milliseconds: 300));
+
+        if (context.mounted) {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (_) => ChallengeDoneScreen(challenge: updatedChallenge)),
+          );
+        }
+      }
+    }
+  }
+
+  /// ✅ 수동 체크 다이얼로그
+  Future<void> _confirmManualRoutineCheck() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF1B2C2E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text("오늘 도전 해내셨나요?",
+            style: TextStyle(fontFamily: 'kopub', fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white)),
+        content: const Text("'네, 오늘 해냈어요!'를 누르시면 \n오늘의 도전은 성공으로 체크됩니다!",
+        style: TextStyle(fontFamily: 'kopub', fontSize: 15, height: 1.4, color: Colors.white70,),),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child:
+              const Text("네, 오늘 해냈어요!", style: TextStyle(color: Colors.amberAccent))),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child:
+                  const Text("아니요, 아직 못 했어요", style: TextStyle(color: Colors.redAccent))),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await _saveRoutineCheck(); // 체크 저장
+
+      await context.read<ChallengeProvider>().refreshChallengeStatus(_currentChallenge.id);
+
+      if (mounted) {
+        setState(() {
+          _recordDataFuture = ChallengeRecordService.fetchChallengeRecord(_currentChallenge.id);
+        });
+      }
+    }
+  }
+
+  /// ✅ 체크 저장 및 상태 업데이트
+  Future<void> _saveRoutineCheck() async {
+    final today = DateTime.now();
+    final totalMinutes = await ReadingLogService.getTodayTotalMinutes();
+    print('[DEBUG🔥] _saveRoutineCheck() - todayMinutes: $totalMinutes');
+
+    await ChallengeRecordService.saveRoutineCheck(
+      _currentChallenge.id,
+      today,
+      true,
+      minutes: totalMinutes,
+    );
+
+    await ChallengeRecordService.saveCountCheck(
+      _currentChallenge.id,
+      today,
+      true,
+    );
+
+    recordData = await ChallengeRecordService.fetchChallengeRecord(_currentChallenge.id);
+    print("[DEBUG🔥] _saveRoutineCheck() - after fetch: $recordData");
+
+    await _handleCheckSuccess();
+  }
+
+  /// ✅ 루틴 달력
+  Widget buildRoutineProgressCalendar(Challenge challenge, Map<String, dynamic>? recordData) {
+    final startOfMonth = DateTime(currentMonth.year, currentMonth.month, 1);
+
+    final safeRecordData = recordData ?? {};
+    final Map<String, dynamic> routineChecks =
+        (safeRecordData['routineChecks'] as Map?)?.cast<String, dynamic>() ?? {};
+    final Map<String, dynamic> rawMinutesMap =
+        (safeRecordData['dailyMinutes'] as Map?)?.cast<String, dynamic>() ?? {};
+    final dailyMinutesMap = rawMinutesMap.map((k, v) => MapEntry(k, (v as num).toInt()));
+
+    final checkType = getChallengeCheckActionType(challenge);
+    final requiredMinutes = challenge.requiredMinutes ?? 0;
+
+    /// ✅ 현재 챌린지 시도(stage 포함)
+    final attempt = challenge.attempts.isNotEmpty ? challenge.attempts.last : null;
+    final stageIndex = attempt?.stageIndex ?? 0;
+    final startDate = attempt?.startDate?.toLocal();
+    final duration = attempt?.selectedDuration ?? 0;
+    final endDate = (startDate != null && duration > 0)
+        ? startDate.add(Duration(days: duration - 1))
+        : null;
+
+    Widget buildCalendarDayCell(DateTime date) {
+      final dateKey = "${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}";
+      final today = DateTime.now().toLocal();
+      final dateOnly = DateTime(date.year, date.month, date.day);
+      final todayOnly = DateTime(today.year, today.month, today.day);
+      final isToday = dateOnly == todayOnly;
+
+      final isInMonth = date.month == currentMonth.month;
+      final isInRange = startDate != null && endDate != null &&
+          !dateOnly.isBefore(startDate) &&
+          !dateOnly.isAfter(endDate);
+
+      bool isChecked = false;
+
+      if (isInRange) {
+        if (checkType == ChallengeCheckActionType.manual || checkType == ChallengeCheckActionType.pageAuto) {
+          isChecked = routineChecks[dateKey] == true;
+        } else if (checkType == ChallengeCheckActionType.timerAuto) {
+          final minutes = dailyMinutesMap[dateKey] ?? 0;
+          isChecked = minutes >= requiredMinutes;
+        }
+      }
+
+      if (startDate != null && dateOnly.isBefore(startDate)) {
+        isChecked = false; // 시작 전 무조건 체크 불가
+      }
+      if (dateOnly.isAfter(todayOnly)) {
+        isChecked = false; // 미래 날짜 체크 불가
+      }
+
+      return Container(
+        margin: const EdgeInsets.all(4),
+        width: 44,
+        height: 44,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: isChecked
+              ? const Color(0xFF00FF88).withOpacity(0.7)
+              : Colors.white10,
+          border: isToday ? Border.all(color: Colors.amberAccent, width: 2) : null,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: isInMonth
+            ? (isChecked
+            ? const Icon(Icons.check, color: Colors.black, size: 20)
+            : Text(
+          "${date.day}",
+          style: TextStyle(
+            color: isInRange ? Colors.white : Colors.white30,
+            fontFamily: 'kopub',
+          ),
+        ))
+            : const SizedBox.shrink(),
+      );
+    }
+
+    List<Widget> buildCalendarGrid() {
+      final List<Widget> rows = [];
+      final firstWeekday = startOfMonth.weekday % 7;
+      int dayCounter = 1 - firstWeekday;
+
+      for (int week = 0; week < 6; week++) {
+        List<Widget> days = [];
+        for (int weekday = 0; weekday < 7; weekday++) {
+          final date = DateTime.utc(currentMonth.year, currentMonth.month, 1)
+              .add(Duration(days: dayCounter - 1))
+              .add(const Duration(hours: 9)); // 한국 시간 보정
+          days.add(buildCalendarDayCell(date));
+          dayCounter++;
+        }
+        rows.add(Row(mainAxisAlignment: MainAxisAlignment.center, children: days));
+      }
+      return rows;
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 12),
+        const Text("🔸 이번 달 루틴 체크",
+            style: TextStyle(
+                color: Colors.white, fontSize: 16, fontFamily: 'Kopub')),
+        const SizedBox(height: 12),
+        Center(
+          child: Text(
+            "완료된 날은 자동으로 표시돼요!",
+            style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 12,
+                fontFamily: 'Kopub',
+                fontWeight: FontWeight.bold),
+          ),
+        ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.chevron_left, color: Colors.white),
+              onPressed: () => setState(() => currentMonth =
+                  DateTime(currentMonth.year, currentMonth.month - 1)),
+            ),
+            Text("${currentMonth.year}년 ${currentMonth.month}월",
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontFamily: 'kopub',
+                    fontWeight: FontWeight.bold)),
+            IconButton(
+              icon: const Icon(Icons.chevron_right, color: Colors.white),
+              onPressed: () => setState(() => currentMonth =
+                  DateTime(currentMonth.year, currentMonth.month + 1)),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        ...buildCalendarGrid(),
+      ],
+    );
+  }
+
+  /// ✅ 읽어야 할 책
+  Widget _buildReadingBookSection(Challenge challenge, List<BookModel> savedBooks) {
+    const completeThreshold = 0.97;
+
+    final isSystemDefined = challenge.specificBookMode == SpecificBookMode.systemDefined;
+    final isUserDefined = challenge.specificBookMode == SpecificBookMode.userDefined;
+
+    List<BookModel> books = [];
+
+    if (isSystemDefined && detailedRequiredBooks.isNotEmpty) {
+      books = detailedRequiredBooks.map((book) {
+        final matched = savedBooks.firstWhere((s) => s.id == book.id, orElse: () => book);
+        return matched.copyWith(
+          pageRead: matched.pageRead ?? 0,
+          pageCount: book.pageCount > 0 ? book.pageCount : matched.pageCount,
+        );
+      }).toList();
+    } else if (isUserDefined && challenge.participatingBooks != null) {
+      books = challenge.participatingBooks!.map((book) {
+        final updated = savedBooks.firstWhere((b) => b.id == book.id, orElse: () => book);
+        return updated;
+      }).toList();
+    }
+
+    if (books.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text("🔸 읽어야 할 책", style: TextStyle(color: Colors.white, fontSize: 16, fontFamily: 'Kopub')),
+        const SizedBox(height: 12),
+        ...books.map((book) {
+          final pageCount = book.pageCount ?? 0;
+          final pageRead = book.pageRead ?? 0;
+          final percentage = pageCount > 0
+              ? (pageRead / pageCount * 100).clamp(0, 100).toInt()
+              : 0;
+
+          final isDone = (book.isCompleted ?? false) ||
+              (pageCount > 0 && pageRead >= (pageCount * completeThreshold).floor());
+
+          final progressBar = pageCount > 0
+              ? Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: LinearProgressIndicator(
+              value: (pageRead / pageCount).clamp(0.0, 1.0),
+              minHeight: 6,
+              backgroundColor: Colors.white24,
+              valueColor: AlwaysStoppedAnimation<Color>(
+                  isDone ? Colors.greenAccent : Colors.amberAccent),
+            ),
+          )
+              : const SizedBox.shrink();
+
+          return Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+            decoration: BoxDecoration(
+              color: isDone ? Colors.green.withOpacity(0.2) : Colors.white10,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  isDone ? Icons.check_circle : Icons.radio_button_unchecked,
+                  color: isDone ? Colors.greenAccent : Colors.white38,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text("${book.title} (${book.author ?? '작자 미상'})",
+                          style: const TextStyle(
+                              color: Colors.white, fontFamily: 'kopub', fontSize: 15)),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4.0),
+                        child: Text(
+                          pageCount > 0
+                              ? "$pageRead / $pageCount 페이지  ($percentage%)"
+                              : "페이지 정보 없음",
+                          style: TextStyle(
+                              color: isDone ? Colors.greenAccent : Colors.white60,
+                              fontSize: 12),
+                        ),
+                      ),
+                      progressBar,
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        }).toList(),
+      ],
+    );
+  }
+
+  Widget _buildSummaryCard(Challenge challenge) {
+    final typeText = _getChallengeTypeText(challenge.type);
+
+    return Column(
+      children: [
+        _buildInfoCard("💡 한줄 소개", challenge.shortDescription),
+        _buildInfoCard("📂 챌린지 유형", typeText),
+        _buildInfoCard("🎯 도전 목표", challenge.goalDisplayText ?? "도전 목표 미정"),
+        _buildInfoCard("🗓 도전 기간", challenge.periodDisplayText ?? "기간 미정"),
+        _buildInfoCard("🏅 리워드", challenge.rewardTitle),
+      ],
+    );
+  }
+
+  String _getChallengeTypeText(ChallengeType type) {
+    switch (type) {
+      case ChallengeType.routine:
+        return "루틴 챌린지";
+      case ChallengeType.growth:
+        return "성장 챌린지";
+    }
+  }
+
+  Widget _buildDescriptionSection(String title, String content) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white10,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        fontFamily: 'kopub')),
+                const SizedBox(height: 6),
+                Text(content,
+                    style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 15,
+                        height: 1.4,
+                        fontFamily: 'kopub')),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// ✅ 챌린지 포기하기 버튼
+  Future<void> showGiveUpDialog(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1B2C2E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          "정말 포기하시겠어요?",
+          style: TextStyle(
+            fontFamily: 'kopub',
+            fontWeight: FontWeight.bold,
+            fontSize: 18,
+            color: Colors.white,
+          ),
+        ),
+        content: const Text(
+          "지금까지의 챌린지 기록이 모두 삭제됩니다.\n그래도 포기하시겠어요?",
+          style: TextStyle(
+            fontFamily: 'kopub',
+            fontSize: 15,
+            height: 1.4,
+            color: Colors.white70,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text(
+              "계속 도전할래요",
+              style: TextStyle(
+                fontFamily: 'kopub',
+                fontWeight: FontWeight.bold,
+                color: Colors.amberAccent,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text(
+              "네, 포기할게요",
+              style: TextStyle(
+                fontFamily: 'kopub',
+                fontWeight: FontWeight.bold,
+                color: Colors.redAccent,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && context.mounted) {
+      final provider = Provider.of<ChallengeProvider>(context, listen: false);
+      await provider.unjoinChallenge(widget.challenge);
+      if (context.mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+              builder: (_) => const MainScreen(initialTabIndex: 2)),
+          (route) => false,
+        );
+      }
+    }
+  }
+
+}

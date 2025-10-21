@@ -1,0 +1,215 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:dayverse_book/model/base_challenge.dart';
+import 'package:dayverse_book/model/challenge_attempt_model.dart';
+import 'package:dayverse_book/model/book_model.dart';
+import 'package:flutter/foundation.dart';
+
+class ChallengeRecordService {
+  static final _firestore = FirebaseFirestore.instance;
+  static final _auth = FirebaseAuth.instance;
+
+  /// ✅ 초기 기록 저장
+  static Future<void> saveInitialRecord(
+    BaseChallenge challenge, {
+    int? targetCheckCount,
+    int? selectedDuration,
+    Map<String, dynamic>? additionalFields,
+  }) async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+
+    final docRef = _firestore
+        .collection('users')
+        .doc(uid)
+        .collection('challengeRecords')
+        .doc(challenge.id);
+
+    final resolvedTargetCount = targetCheckCount ??
+        (challenge.checkCountOptions?.isNotEmpty == true
+            ? challenge.checkCountOptions!.first
+            : 1);
+
+    final safeAttempts = challenge.attempts.isNotEmpty
+        ? challenge.attempts
+        : [
+            ChallengeAttempt(
+              startDate: challenge.startDate ?? DateTime.now(),
+              endDate: challenge.endDate ?? DateTime.now(),
+              completedBookIds: [],
+              completed: false,
+              isSuccessful: false,
+              stageIndex: 0,
+              selectedDuration: selectedDuration ?? resolvedTargetCount,
+            )
+          ];
+
+    final booksAsMap = challenge.participatingBooks?.map((b) => b.toMap()).toList() ?? [];
+
+    final data = {
+      'isJoined': true,
+      'isCompleted': false,
+      'attempts': safeAttempts.map((e) => e.toMap()).toList(),
+      'participatingBooks': booksAsMap,
+      'startDate': challenge.startDate?.toIso8601String(),
+      'endDate': challenge.endDate?.toIso8601String(),
+      'selectedDuration': selectedDuration ?? resolvedTargetCount,
+      'targetCheckCount': resolvedTargetCount,
+      'stageIndex': safeAttempts.last.stageIndex,
+      'countChecks': {},
+      'routineChecks': {},
+      'specificBookChecks': {},
+      'dailyMinutes': {},
+      'bookReadPages': {},
+      'pageCounts': {},
+      'completedCount': 0,
+      if (additionalFields != null) ...additionalFields,
+    };
+
+    await docRef.set(data, SetOptions(merge: true));
+    debugPrint('[SAVE] Initial challenge record saved: ${challenge.title}');
+  }
+
+  /// ✅ Fetch record
+  static Future<Map<String, dynamic>> fetchChallengeRecord(String challengeId) async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return {};
+    final doc = await _firestore
+        .collection('users')
+        .doc(uid)
+        .collection('challengeRecords')
+        .doc(challengeId)
+        .get();
+
+    return Map<String, dynamic>.from(doc.data() ?? {});
+  }
+
+  /// ✅ Save count check
+  static Future<void> saveCountCheck(String challengeId, DateTime date, bool isChecked) async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+    final dateKey = _formatDate(date);
+    await _firestore
+        .collection('users')
+        .doc(uid)
+        .collection('challengeRecords')
+        .doc(challengeId)
+        .set({
+      'countChecks.$dateKey': isChecked,
+    }, SetOptions(merge: true));
+  }
+
+  /// ✅ Save routine check (with optional minutes)
+  static Future<void> saveRoutineCheck(String challengeId, DateTime date, bool isChecked, {int minutes = 0}) async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+    final dateKey = _formatDate(date);
+
+    final docRef = _firestore
+        .collection('users')
+        .doc(uid)
+        .collection('challengeRecords')
+        .doc(challengeId);
+
+    final snapshot = await docRef.get();
+    final data = snapshot.data() ?? {};
+
+    final routineChecks = Map<String, dynamic>.from(data['routineChecks'] ?? {});
+    final dailyMinutes = Map<String, dynamic>.from(data['dailyMinutes'] ?? {});
+
+    routineChecks[dateKey] = isChecked;
+    dailyMinutes[dateKey] = minutes;
+
+    final updated = {
+      'routineChecks': routineChecks,
+      'dailyMinutes': dailyMinutes,
+    };
+
+    await docRef.set(updated, SetOptions(merge: true));
+  }
+
+  /// ✅ Save specific book check
+  static Future<void> saveSpecificBookCheck(String challengeId, String bookId, bool isChecked) async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+
+    await _firestore
+        .collection('users')
+        .doc(uid)
+        .collection('challengeRecords')
+        .doc(challengeId)
+        .set({
+      'specificBookChecks.$bookId': isChecked,
+    }, SetOptions(merge: true));
+  }
+
+  /// ✅ Save book read pages
+  static Future<void> saveBookReadPages(String challengeId, String bookId, int pageCount) async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+
+    final docRef = _firestore
+        .collection('users')
+        .doc(uid)
+        .collection('challengeRecords')
+        .doc(challengeId);
+
+    final snapshot = await docRef.get();
+    final data = snapshot.data() ?? {};
+    final bookReadPages = Map<String, int>.from(data['bookReadPages'] ?? {});
+    bookReadPages[bookId] = pageCount;
+
+    await docRef.set({
+      'bookReadPages': bookReadPages,
+    }, SetOptions(merge: true));
+  }
+
+  /// ✅ Save page count (by date)
+  static Future<void> savePageCount(String challengeId, DateTime date, int pageCount) async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+    final dateKey = _formatDate(date);
+
+    await _firestore
+        .collection('users')
+        .doc(uid)
+        .collection('challengeRecords')
+        .doc(challengeId)
+        .set({
+      'pageCounts.$dateKey': pageCount,
+    }, SetOptions(merge: true));
+  }
+
+  /// ✅ Update record with any fields
+  static Future<void> updateChallengeRecord(String challengeId, Map<String, dynamic> updates) async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+
+    await _firestore
+        .collection('users')
+        .doc(uid)
+        .collection('challengeRecords')
+        .doc(challengeId)
+        .set(updates, SetOptions(merge: true));
+  }
+
+  /// ✅ Delete record
+  static Future<void> deleteChallengeRecord(String challengeId) async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+
+    await _firestore
+        .collection('users')
+        .doc(uid)
+        .collection('challengeRecords')
+        .doc(challengeId)
+        .delete();
+  }
+
+  /// ✅ Format date key
+  static String _formatDate(DateTime date) {
+    return "${date.year}-${_twoDigits(date.month)}-${_twoDigits(date.day)}";
+  }
+
+  static String _twoDigits(int n) => n.toString().padLeft(2, '0');
+}

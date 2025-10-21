@@ -1,0 +1,94 @@
+class ChallengeProgressUtils {
+  // ✅ 날짜가 챌린지 기간 내에 있는지 확인
+  static bool isWithinChallengePeriod(String? endDateStr, Challenge challenge) {
+    if (endDateStr == null) return false;
+    try {
+      final endDate = DateTime.parse(endDateStr);
+      return !endDate.isBefore(challenge.startDate) && !endDate.isAfter(challenge.endDate);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // ✅ 진행률 계산: 0.0 ~ 1.0
+  static double getProgress(Challenge challenge, List<Map<String, dynamic>> savedBooks) {
+    if (challenge.type == ChallengeType.totalBooks) {
+      final doneBooks = savedBooks.where((book) =>
+      book['category'] == 'done' &&
+          isWithinChallengePeriod(book['endDate'], challenge)
+      ).length;
+      return (doneBooks / challenge.totalBooks).clamp(0.0, 1.0);
+    } else if (challenge.type == ChallengeType.specificBooks) {
+      final requiredIds = (challenge.requiredBooks ?? [])
+          .map((book) => book["id"].toString())
+          .toSet();
+      final doneIds = savedBooks
+          .where((book) =>
+      book['category'] == 'done' &&
+          isWithinChallengePeriod(book['endDate'], challenge))
+          .map((book) => book['id'].toString())
+          .toSet();
+      final matched = requiredIds.intersection(doneIds);
+      return (matched.length / (requiredIds.length == 0 ? 1 : requiredIds.length)).clamp(0.0, 1.0);
+    } else {
+      return 0.0;
+    }
+  }
+
+  // ✅ 챌린지 완료 여부 판단
+  static bool isChallengeCompleted(Challenge challenge, List<Map<String, dynamic>> savedBooks) {
+    if (challenge.type == ChallengeType.specificBooks) {
+      final requiredIds = (challenge.requiredBooks ?? [])
+          .map((book) => book["id"].toString())
+          .toSet();
+      final readIds = savedBooks
+          .where((book) =>
+      book['category'] == 'done' &&
+          isWithinChallengePeriod(book['endDate'], challenge))
+          .map((book) => book['id'].toString())
+          .toSet();
+      return requiredIds.every((id) => readIds.contains(id));
+    }
+
+    final doneBooks = savedBooks.where((book) =>
+    book['category'] == 'done' &&
+        isWithinChallengePeriod(book['endDate'], challenge)
+    ).length;
+    return doneBooks >= challenge.totalBooks;
+  }
+
+  // ✅ 완료된 책 수 반환
+  static int getCompletedCount(Challenge challenge, List<Map<String, dynamic>> savedBooks) {
+    if (challenge.type == ChallengeType.totalBooks) {
+      return savedBooks.where((book) =>
+      book['category'] == 'done' &&
+          isWithinChallengePeriod(book['endDate'], challenge)
+      ).length;
+    } else if (challenge.type == ChallengeType.specificBooks) {
+      final requiredIds = (challenge.requiredBooks ?? [])
+          .map((book) => book["id"].toString())
+          .toSet();
+      final doneIds = savedBooks
+          .where((book) =>
+      book['category'] == 'done' &&
+          isWithinChallengePeriod(book['endDate'], challenge))
+          .map((book) => book['id'].toString())
+          .toSet();
+      return requiredIds.intersection(doneIds).length;
+    } else {
+      return 0;
+    }
+  }
+
+  // ✅ 총 필요한 책 수 반환
+  static int getTargetCount(Challenge challenge) {
+    if (challenge.type == ChallengeType.totalBooks) {
+      return challenge.totalBooks;
+    } else if (challenge.type == ChallengeType.specificBooks) {
+      return (challenge.requiredBooks ?? []).length;
+    } else {
+      return 0;
+    }
+  }
+
+}

@@ -1,0 +1,167 @@
+import 'package:flutter/material.dart';
+import 'package:uuid/uuid.dart';
+import 'package:dayverse_book/model/challenge_attempt_model.dart';
+import 'package:dayverse_book/model/book_model.dart';
+
+enum ChallengeType { routine, growth }
+enum ChallengeMethod { countBased, specificBooks, quantityBased }
+enum ChallengePeriod { periodBased, daysBased, infinite }
+enum ChallengeCheckMode { manual, auto }
+enum SpecificBookMode { systemDefined, userDefined }
+
+abstract class BaseChallenge {
+  final String id;
+  final String title;
+  final String shortDescription;
+  final String? longDescription;
+  final String? goalDescription;
+  final String? recommendedFor;
+  final String? guideText;
+
+  final ChallengeType type;
+  final ChallengeMethod method;
+  final ChallengePeriod period;
+  final ChallengeCheckMode checkMode;
+
+  final List<int>? durationOptions;
+  final List<int>? checkCountOptions;
+  final DateTime? startDate;
+  final DateTime? endDate;
+
+  final int? totalBooks;
+  final List<Map<String, dynamic>>? requiredBooks;
+  final List<BookModel>? participatingBooks;
+
+  final String imageUrl;
+  final String badgeImage;
+  final String rewardTitle;
+  final String? goalDisplayText;
+  final String? periodDisplayText;
+
+  final bool isCustom;
+  final bool isPremium;
+  final bool isJoined;
+  final bool isCompleted;
+  final bool isRepeatable;
+  final bool forceBookSelection;
+
+  final int? requiredMinutes;
+  final int? requiredPages;
+  final SpecificBookMode? specificBookMode;
+
+  final TimeOfDay? allowedStartTime;
+  final TimeOfDay? allowedEndTime;
+
+  final List<ChallengeAttempt> attempts;
+
+  BaseChallenge({
+    String? id,
+    required this.title,
+    required this.shortDescription,
+    this.longDescription,
+    this.goalDescription,
+    this.recommendedFor,
+    this.guideText,
+    required this.type,
+    required this.method,
+    required this.period,
+    required this.checkMode,
+    this.durationOptions,
+    this.checkCountOptions,
+    this.startDate,
+    this.endDate,
+    this.totalBooks,
+    this.requiredBooks,
+    this.participatingBooks,
+    required this.imageUrl,
+    required this.badgeImage,
+    required this.rewardTitle,
+    this.goalDisplayText,
+    this.periodDisplayText,
+    this.isCustom = false,
+    this.isPremium = false,
+    this.isJoined = false,
+    this.isCompleted = false,
+    this.isRepeatable = false,
+    this.forceBookSelection = false,
+    this.requiredMinutes,
+    this.requiredPages,
+    this.specificBookMode,
+    this.allowedStartTime,
+    this.allowedEndTime,
+    this.attempts = const [],
+  }) : id = id ?? const Uuid().v4();
+
+  /// 🔑 공통: Map 변환 (구현은 subclass에서)
+  Map<String, dynamic> toMap();
+
+  /// 🔑 최신 시도 가져오기
+  ChallengeAttempt? get latestAttempt => attempts.isNotEmpty ? attempts.last : null;
+
+  /// 🔑 현재 스테이지 인덱스 (NormalChallenge에선 항상 0)
+  int get currentStageIndex => latestAttempt?.stageIndex ?? 0;
+
+  /// 🔑 스테이지 정보 문자열
+  String stageText(List<int> stageDurations) {
+    if (stageDurations.isEmpty) return '';
+    return '${currentStageIndex + 1}단계 / 총 ${stageDurations.length}단계';
+  }
+
+  /// 🔑 시작~종료 기간 문자열
+  String formattedPeriod() {
+    final s = startDate;
+    final e = endDate;
+    if (s == null || e == null) return '-';
+    return '${_dateStr(s)} ~ ${_dateStr(e)}';
+  }
+
+  /// 🔑 시간대 허용 여부
+  bool isWithinAllowedTime() {
+    if (allowedStartTime == null || allowedEndTime == null) return true;
+    final now = TimeOfDay.now();
+    final start = allowedStartTime!;
+    final end = allowedEndTime!;
+
+    final nowMinutes = now.hour * 60 + now.minute;
+    final startMinutes = start.hour * 60 + start.minute;
+    final endMinutes = end.hour * 60 + end.minute;
+
+    return nowMinutes >= startMinutes && nowMinutes <= endMinutes;
+  }
+
+  /// 🔑 날짜 -> 문자열
+  String _dateStr(DateTime dt) => '${dt.year}-${_twoDigits(dt.month)}-${_twoDigits(dt.day)}';
+
+  String _twoDigits(int n) => n.toString().padLeft(2, '0');
+
+  static TimeOfDay parseTimeOfDay(String input) {
+    try {
+      final parts = input.split(':');
+      if (parts.length != 2) throw FormatException("잘못된 시간 포맷: $input");
+      final hour = int.tryParse(parts[0]) ?? 0;
+      final minute = int.tryParse(parts[1]) ?? 0;
+      return TimeOfDay(hour: hour, minute: minute);
+    } catch (e) {
+      debugPrint("⚠️ parseTimeOfDay 에러: $e, input=$input");
+      return const TimeOfDay(hour: 0, minute: 0);
+    }
+  }
+
+  /// 🔑 enum 파싱 유틸
+  static ChallengeType parseChallengeType(String? name) =>
+      ChallengeType.values.firstWhere((e) => e.name == name, orElse: () => ChallengeType.routine);
+
+  static ChallengeMethod parseChallengeMethod(String? name) =>
+      ChallengeMethod.values.firstWhere((e) => e.name == name, orElse: () => ChallengeMethod.countBased);
+
+  static ChallengePeriod parseChallengePeriod(String? name) =>
+      ChallengePeriod.values.firstWhere((e) => e.name == name, orElse: () => ChallengePeriod.daysBased);
+
+  static ChallengeCheckMode parseChallengeCheckMode(String? name) =>
+      ChallengeCheckMode.values.firstWhere((e) => e.name == name, orElse: () => ChallengeCheckMode.manual);
+
+  static SpecificBookMode? parseSpecificBookMode(String? name) =>
+      name != null ? SpecificBookMode.values.firstWhere((e) => e.name == name) : null;
+
+
+}

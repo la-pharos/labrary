@@ -1,0 +1,59 @@
+import 'package:flutter/material.dart';
+import 'package:dayverse_book/model/base_challenge.dart';
+import 'package:dayverse_book/model/normal_challenge.dart';
+import 'package:dayverse_book/model/stage_challenge.dart';
+/// ✅ 체크 동작 방식 구분
+enum ChallengeCheckActionType {
+  timerAuto,      // ⏱ 타이머 자동 체크
+  pageAuto,       // 📖 페이지 자동 체크
+  libraryAuto,    // 📚 서재 연동 자동 체크
+  manual,         // ✅ 수동 체크
+  none,           // ❌ 체크 없음
+}
+
+/// ✅ 챌린지에 따라 체크 방식 분기
+ChallengeCheckActionType getChallengeCheckActionType(BaseChallenge challenge) {
+  // 수동 체크 모드인 경우
+  if (challenge.checkMode == ChallengeCheckMode.manual) {
+    return ChallengeCheckActionType.manual;
+  }
+
+  // ✅ 우선순위 1: 시간 기반
+  if ((challenge.requiredMinutes ?? 0) > 0) {
+    return ChallengeCheckActionType.timerAuto;
+  }
+
+  // ✅ 우선순위 2: 페이지 기반
+  if ((challenge.requiredPages ?? 0) > 0) {
+    return ChallengeCheckActionType.pageAuto;
+  }
+
+  // ✅ 우선순위 3: 자동 + 도전 방식 기반
+  if (challenge.method == ChallengeMethod.quantityBased ||
+      challenge.method == ChallengeMethod.specificBooks) {
+    return ChallengeCheckActionType.libraryAuto;
+  }
+
+  // 그 외에는 체크 없음
+  return ChallengeCheckActionType.none;
+}
+
+/// ✅ 시간대 제한 확인 유틸
+bool isWithinAllowedTime(BaseChallenge challenge) {
+  if (challenge.allowedStartTime == null || challenge.allowedEndTime == null) return true;
+
+  try {
+    final now = TimeOfDay.now();
+    final start = challenge.allowedStartTime!;
+    final end = challenge.allowedEndTime!;
+
+    final nowMinutes = now.hour * 60 + now.minute;
+    final startMinutes = start.hour * 60 + start.minute;
+    final endMinutes = end.hour * 60 + end.minute;
+
+    return nowMinutes >= startMinutes && nowMinutes <= endMinutes;
+  } catch (e) {
+    debugPrint('[ERROR] isWithinAllowedTime: $e');
+    return true; // 오류 발생 시 제한 없이 허용
+  }
+}

@@ -1,0 +1,587 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:dayverse_book/model/challenge_model.dart';
+import 'package:dayverse_book/provider/challenge_provider.dart';
+import 'package:dayverse_book/widget/search_box_with_results.dart';
+import 'package:dayverse_book/constants/dummy_book_list.dart';
+import 'package:dayverse_book/screen/challenge_ongoing_screen.dart';
+import 'package:dayverse_book/provider/saved_books_provider.dart';
+import 'package:dayverse_book/utils/book_utils.dart';
+import 'package:dayverse_book/service/challenge_record_service.dart';
+
+
+class ChallengeDetailScreen extends StatelessWidget {
+  final Challenge challenge;
+  const ChallengeDetailScreen({super.key, required this.challenge});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF013328),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
+        centerTitle: true,
+        title: Text(
+          challenge.title,
+          style: const TextStyle(
+            color: Colors.white,
+            fontFamily: 'kopub',
+            fontSize: 20,
+          ),
+        ),
+      ),
+      body: Stack(
+        children: [
+          SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildImage(challenge.imageUrl, context),
+                const SizedBox(height: 20),
+                const Divider(color: Colors.white24),
+                const SizedBox(height: 10),
+                Text(
+                  challenge.title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontFamily: 'kopub',
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _buildSummaryCard(challenge),
+                const SizedBox(height: 10),
+                const Divider(color: Colors.white24),
+                const SizedBox(height: 16),
+                if (challenge.longDescription != null && challenge.longDescription!.isNotEmpty)
+                  _buildDescriptionSection("📖 챌린지 소개", challenge.longDescription!),
+                if (challenge.goalDescription != null && challenge.goalDescription!.isNotEmpty)
+                  _buildDescriptionSection("🎯 도전 목표", challenge.goalDescription!),
+                if (challenge.recommendedFor != null && challenge.recommendedFor!.isNotEmpty)
+                  _buildDescriptionSection("🙋 이런 분께 추천", challenge.recommendedFor!),
+                if (challenge.guideText != null && challenge.guideText!.isNotEmpty)
+                  _buildDescriptionSection("📌 진행 방법", challenge.guideText!),
+                if (challenge.type == ChallengeType.specificBooks)
+                  _buildSpecificBookSection(challenge, Provider.of<SavedBooksProvider>(context).savedBooks),
+                const SizedBox(height: 100),
+              ],
+            ),
+          ),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 40.0),
+              child: SizedBox(
+                width: MediaQuery.of(context).size.width * 0.9,
+                child: ElevatedButton(
+                  onPressed: () async {
+                    showDialog(
+                      context: context,
+                      builder: (ctx) => ChallengeParticipationDialog(challenge: challenge),
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.amberAccent,
+                    padding: const EdgeInsets.symmetric(vertical: 18),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  ),
+                  child: const Text("챌린지 참여하기",
+                      style: TextStyle(
+                          fontSize: 18, fontFamily: 'kopub', fontWeight: FontWeight.bold, color: Colors.black)),
+                ),
+              ),
+            ),
+          )
+        ],
+      ),
+    );
+  }
+
+  Widget _buildImage(String imageUrl, BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: Image.asset(
+        imageUrl,
+        width: screenWidth,
+        height: screenWidth * 1, // 여기 비율 조절 가능 (0.5 ~ 0.6 추천)
+        fit: BoxFit.cover,
+        alignment: Alignment.bottomCenter,
+        errorBuilder: (_, __, ___) => Container(
+          width: screenWidth,
+          height: screenWidth * 0.3, // 오류 시에도 비율 기반
+          color: Colors.grey,
+          child: const Icon(Icons.flag, color: Colors.white, size: 50),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSummaryCard(Challenge challenge) {
+    final typeText = _getChallengeTypeText(challenge.kind);
+
+    final isDailyRoutine = challenge.kind == ChallengeKind.routine && challenge.routineCheckMode == RoutineCheckMode.daily;
+    final isConditionalRoutine = challenge.kind == ChallengeKind.routine && challenge.routineCheckMode == RoutineCheckMode.conditional;
+
+    final durationText = (challenge.availableDurations?.isNotEmpty ?? false)
+        ? challenge.availableDurations!.map((d) => "$d일").join(" / ")
+        : (challenge.defaultDurationDays != null ? "${challenge.defaultDurationDays}일 도전" : "기간 미정");
+
+    final goalText = (challenge.targetCheckCountOptions?.isNotEmpty ?? false)
+        ? challenge.targetCheckCountOptions!.map((count) => "$count회").join(" / ")
+        : "목표 미정";
+
+    // ✅ 날짜 기반 기간
+    final hasFixedPeriod = challenge.startDate != null && challenge.endDate != null;
+    final fixedPeriodText = hasFixedPeriod
+        ? "${challenge.startDate!.year}.${challenge.startDate!.month.toString().padLeft(2, '0')}.${challenge.startDate!.day.toString().padLeft(2, '0')} ~ ${challenge.endDate!.year}.${challenge.endDate!.month.toString().padLeft(2, '0')}.${challenge.endDate!.day.toString().padLeft(2, '0')}"
+        : null;
+
+    // ✅ 일수 기반 기간
+    final fixedDaysText = challenge.defaultDurationDays != null ? "${challenge.defaultDurationDays}일 도전" : null;
+
+    return Column(
+      children: [
+        _buildInfoCard("💡 한줄 소개", challenge.shortDescription),
+        _buildInfoCard("📂 챌린지 유형", typeText),
+        if (isDailyRoutine) _buildInfoCard("🗓 도전 기간", durationText),
+        if (isConditionalRoutine) _buildInfoCard("🗓 도전 횟수", goalText),
+        if (!isDailyRoutine && !isConditionalRoutine)
+          _buildInfoCard("🗓 도전 기간", fixedPeriodText ?? fixedDaysText ?? "기간 미정"), // ✅ 이중 처리
+        _buildInfoCard("🏅 리워드", challenge.rewardTitle),
+      ],
+    );
+  }
+
+  String _getChallengeTypeText(ChallengeKind kind) {
+    switch (kind) {
+      case ChallengeKind.routine:
+        return "루틴 챌린지";
+      case ChallengeKind.goal:
+        return "정복 챌린지";
+      case ChallengeKind.theme:
+        return "테마 챌린지";
+    }
+  }
+
+  Widget _buildDescriptionSection(String title, String content) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white10,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        fontFamily: 'kopub')),
+                const SizedBox(height: 6),
+                Text(content,
+                    style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 15,
+                        height: 1.4,
+                        fontFamily: 'kopub')),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoCard(String title, String value) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(12)),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(title,
+              style: const TextStyle(
+                  color: Colors.white70, fontFamily: 'kopub', fontSize: 16, fontWeight: FontWeight.bold)),
+          Flexible(
+            child: Text(value,
+                textAlign: TextAlign.right,
+                style: const TextStyle(color: Colors.white, fontFamily: 'kopub', fontSize: 16)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDescriptionSectionWithWidget({
+    required String title,
+    required Widget contentWidget,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white10,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  fontFamily: 'kopub')),
+          const SizedBox(height: 12),
+          contentWidget,
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSpecificBookSection(Challenge challenge, List<Map<String, dynamic>> savedBooks) {
+    final requiredBooks = challenge.requiredBooks ?? [];
+
+    final readBookIds = savedBooks
+        .where((book) => book["category"] == "done")
+        .map((book) => book["id"])
+        .toSet();
+
+    return _buildDescriptionSectionWithWidget(
+      title: "📖 읽을 책 목록",
+      contentWidget: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: requiredBooks.map((book) {
+          final id = book["id"];
+          final title = book["title"] ?? "제목 없음";
+          final author = book["author"] ?? "저자 없음";
+          final isRead = readBookIds.contains(id);
+
+          return Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+            decoration: BoxDecoration(
+              color: isRead ? Colors.green.withOpacity(0.2) : Colors.white10,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  isRead ? Icons.check_circle : Icons.radio_button_unchecked,
+                  color: isRead ? Colors.greenAccent : Colors.white38,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    "$title ($author)",
+                    style: const TextStyle(
+                        color: Colors.white, fontFamily: 'kopub', fontSize: 15),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+
+/// 참여 다이얼로그
+
+class ChallengeParticipationDialog extends StatefulWidget {
+  final Challenge challenge;
+  const ChallengeParticipationDialog({super.key, required this.challenge});
+
+  @override
+  State<ChallengeParticipationDialog> createState() => _ChallengeParticipationDialogState();
+}
+
+class _ChallengeParticipationDialogState extends State<ChallengeParticipationDialog> {
+  int? selectedDuration;
+  int? selectedTargetCount;
+  final TextEditingController searchController = TextEditingController();
+  List<Map<String, String>> searchResults = [];
+  List<Map<String, String>> selectedBooks = [];
+  DateTime? selectedStartDate;
+
+  @override
+  void initState() {
+    super.initState();
+    final durations = widget.challenge.availableDurations;
+    if (durations != null && durations.length == 1) {
+      selectedDuration = durations.first;
+    }
+  }
+
+  void onSearchChanged(String keyword) {
+    setState(() {
+      searchResults = dummyBooks.where((book) {
+        final title = book['title']?.toLowerCase() ?? '';
+        final author = book['author']?.toLowerCase() ?? '';
+        return title.contains(keyword.toLowerCase()) || author.contains(keyword.toLowerCase());
+      }).toList();
+    });
+  }
+
+  void onBookSelected(Map<String, String> book) {
+    setState(() {
+      if (!selectedBooks.any((b) => b['title'] == book['title'] && b['author'] == book['author'])) {
+        selectedBooks.add(book);
+      }
+      searchResults = [];
+      searchController.clear();
+    });
+  }
+
+  void onBookRemoved(Map<String, String> book) {
+    setState(() {
+      selectedBooks.remove(book);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final challengeProvider = Provider.of<ChallengeProvider>(context, listen: false);
+    final savedBooksProvider = Provider.of<SavedBooksProvider>(context, listen: false);
+
+    final isRoutine = widget.challenge.kind == ChallengeKind.routine;
+    final isConditionalRoutine = widget.challenge.routineCheckMode == RoutineCheckMode.conditional;
+    final isDailyRoutine = widget.challenge.routineCheckMode == RoutineCheckMode.daily;
+    final isSpecificBooks = widget.challenge.type == ChallengeType.specificBooks;
+    final allowsBookSelection = !isSpecificBooks;
+
+    final availableDurations = widget.challenge.availableDurations ?? (widget.challenge.defaultDurationDays != null ? [widget.challenge.defaultDurationDays!] : []);
+
+    return Dialog(
+      backgroundColor: const Color(0xFF0A1D27),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 80),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text("챌린지 참여 설정", style: TextStyle(fontFamily: 'kopub', fontWeight: FontWeight.bold, fontSize: 22, color: Colors.white)),
+            const SizedBox(height: 20),
+
+            // ✅ 기간 안내 or 선택 UI
+            if (!isRoutine && widget.challenge.startDate != null && widget.challenge.endDate != null) ...[
+              Text(
+                "도전 기간: ${widget.challenge.startDate!.year}년 ${widget.challenge.startDate!.month}월 ${widget.challenge.startDate!.day}일 "
+                    "~ ${widget.challenge.endDate!.year}년 ${widget.challenge.endDate!.month}월 ${widget.challenge.endDate!.day}일",
+                style: const TextStyle(fontFamily: 'kopub', color: Colors.white, fontSize: 18),
+              ),
+              const SizedBox(height: 24),
+            ] else if (isDailyRoutine && availableDurations.length == 1) ...[
+              Text("도전 기간: ${availableDurations.first}일", style: const TextStyle(fontFamily: 'kopub', color: Colors.white, fontSize: 18)),
+              const SizedBox(height: 24),
+            ] else if (isDailyRoutine && availableDurations.length > 1) ...[
+              const Text("도전 기간 선택", style: TextStyle(fontFamily: 'kopub', color: Colors.white, fontSize: 18)),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: availableDurations.map((days) {
+                  final isSelected = selectedDuration == days;
+                  return GestureDetector(
+                    onTap: () => setState(() => selectedDuration = days),
+                    child: Container(
+                      width: 80,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      decoration: BoxDecoration(color: isSelected ? Colors.amberAccent : Colors.white10, borderRadius: BorderRadius.circular(10)),
+                      child: Center(child: Text("$days일", style: TextStyle(color: isSelected ? Colors.black : Colors.white, fontWeight: FontWeight.bold))),
+                    ),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 24),
+            ],
+
+            if (isConditionalRoutine && widget.challenge.targetCheckCountOptions != null) ...[
+              const Text("도전 횟수 선택", style: TextStyle(fontFamily: 'kopub', color: Colors.white, fontSize: 18)),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: widget.challenge.targetCheckCountOptions!.map((count) {
+                  final isSelected = selectedTargetCount == count;
+                  return GestureDetector(
+                    onTap: () => setState(() => selectedTargetCount = count),
+                    child: Container(
+                      width: 80,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      decoration: BoxDecoration(color: isSelected ? Colors.amberAccent : Colors.white10, borderRadius: BorderRadius.circular(10)),
+                      child: Center(child: Text("$count회", style: TextStyle(color: isSelected ? Colors.black : Colors.white, fontWeight: FontWeight.bold))),
+                    ),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 24),
+            ],
+
+            if (isRoutine) ...[
+              const Text("도전 시작일 선택", style: TextStyle(fontFamily: 'kopub', color: Colors.white, fontSize: 18)),
+              const SizedBox(height: 10),
+              GestureDetector(
+                onTap: () async {
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: DateTime.now(),
+                    firstDate: DateTime.now(),
+                    lastDate: DateTime.now().add(const Duration(days: 365)),
+                  );
+                  if (picked != null) setState(() => selectedStartDate = picked);
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                  decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(10)),
+                  child: Text(selectedStartDate != null
+                      ? "${selectedStartDate!.year}년 ${selectedStartDate!.month}월 ${selectedStartDate!.day}일"
+                      : "시작일을 선택해주세요", style: const TextStyle(color: Colors.white)),
+                ),
+              ),
+              const SizedBox(height: 24),
+            ],
+
+            if (allowsBookSelection) ...[
+              const Text("어떤 책으로 도전할지 미리 정해볼까요?", style: TextStyle(fontFamily: 'kopub', fontSize: 18, color: Colors.white)),
+              const SizedBox(height: 6),
+              const Text("선택하지 않아도 도전 가능해요!\n하지만 미리 책을 정하면 성공 확률이 높아져요.\n선택한 책은 '읽는 중인 책'으로 서재에 자동 등록됩니다.",
+                  style: TextStyle(fontFamily: 'kopub', color: Colors.amberAccent, fontSize: 14, height: 1.5)),
+              const SizedBox(height: 15),
+              Container(
+                constraints: const BoxConstraints(maxHeight: 250),
+                child: SingleChildScrollView(
+                  child: SearchBoxWithResults(
+                    searchController: searchController,
+                    searchResults: searchResults,
+                    selectedBooks: selectedBooks,
+                    onSearchChanged: onSearchChanged,
+                    onBookSelected: onBookSelected,
+                    onBookRemoved: onBookRemoved,
+                  ),
+                ),
+              ),
+            ],
+
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () async {
+                  if (isDailyRoutine && (availableDurations.length > 1) && selectedDuration == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("도전 기간을 선택해주세요.")));
+                    return;
+                  }
+                  if (isConditionalRoutine && selectedTargetCount == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("도전 목표 횟수를 선택해주세요.")));
+                    return;
+                  }
+                  if (isRoutine && selectedStartDate == null && (availableDurations?.isNotEmpty ?? false)) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("도전 시작일을 선택해주세요.")));
+                    return;
+                  }
+
+                  final selectedStart = selectedStartDate ?? DateTime.now();
+                  final endDate = isDailyRoutine && selectedDuration != null ? selectedStart.add(Duration(days: selectedDuration! - 1)) : widget.challenge.endDate;
+
+                  // ✅ 도전 기록 Firestore에 저장
+                  await ChallengeRecordService.updateChallengeRecord(widget.challenge.id, {
+                    'routineStartDate': selectedStart.toIso8601String(),
+                    if (isDailyRoutine && selectedDuration != null)
+                      'routineEndDate': endDate?.toIso8601String(),
+                    if (isConditionalRoutine && selectedTargetCount != null)
+                      'targetCheckCount': selectedTargetCount,
+                  });
+
+                  final joinedChallenge = widget.challenge.copyWith(
+                    startDate: selectedStart,
+                    endDate: endDate,
+                    participatingBooks: selectedBooks,
+                    defaultDurationDays: selectedDuration,           // ✅ 일일 루틴 도전 기간 저장
+                    defaultTargetCheckCount: selectedTargetCount,    // ✅ 조건 루틴 목표 횟수 저장
+                  );
+
+                  await challengeProvider.joinChallenge(
+                    joinedChallenge,
+                    startDate: selectedStart,
+                    duration: selectedDuration,
+                    targetCheckCount: selectedTargetCount,
+                    participatingBooks: selectedBooks,
+                  );
+
+                  for (final book in selectedBooks) {
+                    final bookId = generateBookId(book['isbn'], book['title'] ?? '', book['author'] ?? '');
+                    if (!savedBooksProvider.savedBooks.any((b) => b['id'] == bookId)) {
+                      savedBooksProvider.addBook({...book, "id": bookId, "category": "reading", "startDate": selectedStart.toString(), "endDate": null});
+                    }
+                  }
+
+                  if (!context.mounted) return;
+                  Navigator.of(context).pop();
+
+                  showDialog(
+                    context: context,
+                    barrierDismissible: false,
+                    builder: (context) {
+                      Future.delayed(const Duration(seconds: 2), () {
+                        if (context.mounted) {
+                          Navigator.of(context).pop();
+                          Navigator.pushAndRemoveUntil(
+                            context,
+                            MaterialPageRoute(builder: (_) => ChallengeOngoingScreen(challenge: joinedChallenge)),
+                                (route) => false,
+                          );
+                        }
+                      });
+
+                      return AlertDialog(
+                        backgroundColor: Colors.greenAccent,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        content: Row(
+                          children: [
+                            const Icon(Icons.emoji_events, color: Colors.deepPurple, size: 36),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text("'${widget.challenge.title}'\n도전을 시작했습니다!\n응원합니다 💪",
+                                  style: const TextStyle(color: Colors.black, fontFamily: 'kopub', fontWeight: FontWeight.bold, fontSize: 16)),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  );
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.amberAccent,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                child: const Text("도전하기", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black)),
+              ),
+            )
+          ],
+        ),
+      ),
+    );
+  }
+}

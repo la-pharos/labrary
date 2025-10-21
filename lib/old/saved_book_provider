@@ -1,0 +1,344 @@
+import 'package:flutter/material.dart';
+import 'package:dayverse_book/model/book_model.dart';
+import 'package:dayverse_book/service/book_service.dart';
+import 'package:dayverse_book/provider/custom_library_provider.dart';
+import 'package:dayverse_book/provider/challenge_provider.dart';
+import 'package:dayverse_book/service/challenge_record_service.dart';
+import 'package:dayverse_book/utils/book_utils.dart';
+import 'package:dayverse_book/main.dart';
+import 'package:provider/provider.dart';
+import 'package:dayverse_book/model/challenge_model.dart';
+
+class SavedBooksProvider extends ChangeNotifier {
+  List<Map<String, dynamic>> _savedBooks = [];
+  final List<Map<String, dynamic>> _bookRecords = [];
+
+  List<Map<String, dynamic>> get savedBooks => _savedBooks;
+  List<Map<String, dynamic>> get bookRecords => _bookRecords;
+
+  String _formatDate(DateTime date) {
+    return "${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}";
+  }
+
+  void addBook(Map<String, dynamic> book) async {
+    final bookId = book["id"];
+    final index = _savedBooks.indexWhere((b) => b["id"] == bookId);
+
+    if (index != -1) {
+      _savedBooks[index]["rereadCount"] = (_savedBooks[index]["rereadCount"] ?? 1) + 1;
+    } else {
+      final newBook = {
+        ...book,
+        "records": [],
+        "customLibraries": <String>[],
+        "rereadCount": 1,
+        "pageRead": book['pageRead'] ?? 0,
+        "totalPages": book['totalPages'] ?? book['pageCount'] ?? 0,
+        "category": book['category'] ?? 'reading', // ✅ 기본값 추가
+      };
+
+      print("📌 [addBook] Firestore 저장 호출 - ${newBook['id']}");
+
+      _savedBooks.insert(0, newBook);
+      await BookService.saveBookToFirestore(newBook); // ✅ Firestore 저장 추가
+    }
+
+
+    notifyListeners();
+  }
+
+  Future<void> updatePageRead(String bookId, int newPageRead) async {
+    final index = _savedBooks.indexWhere((b) => b['id'] == bookId);
+    if (index != -1) {
+      _savedBooks[index]['pageRead'] = newPageRead;
+      notifyListeners();
+      await BookService.updateBookInFirestore(bookId, {'pageRead': newPageRead});
+    }
+  }
+
+  Future<void> removeBook(String bookId, CustomLibraryProvider customLibraryProvider) async {
+    _savedBooks.removeWhere((book) => book['id'] == bookId);
+    _bookRecords.removeWhere((record) => record['bookId'] == bookId);
+    customLibraryProvider.removeBookEverywhere(bookId);
+    notifyListeners();
+    await BookService.deleteBookFromFirestore(bookId);
+
+    final bookRecordIds = (await BookService.getRecordsFromFirestore())
+        .where((r) => r['bookId'] == bookId)
+        .map((r) => r['recordId'])
+        .toList();
+
+    for (final recordId in bookRecordIds) {
+      await BookService.deleteRecordFromFirestore(recordId);
+    }
+  }
+
+  Future<void> updateBook(String bookId, Map<String, dynamic> newBook) async {
+    final index = _savedBooks.indexWhere((b) => b["id"] == bookId);
+    if (index != -1) {
+      _savedBooks[index] = {...newBook, "records": _savedBooks[index]["records"] ?? [], "customLibraries": _savedBooks[index]["customLibraries"] ?? []};
+      notifyListeners();
+      await BookService.updateBookInFirestore(bookId, {
+        'title': newBook['title'],
+        'author': newBook['author'],
+        'publisher': newBook['publisher'],
+        'imageUrl': newBook['imageUrl'],
+        'isbn': newBook['isbn'],
+        'category': newBook['category'],
+        'startDate': newBook['startDate'],
+        'endDate': newBook['endDate'],
+      });
+    }
+  }
+
+  Future<void> addRecord(String bookId, String content) async {
+    final savedAt = DateTime.now().toString();
+    final book = _savedBooks.firstWhere((b) => b["id"] == bookId, orElse: () => {});
+    if (book.isEmpty) return;
+
+    final recordId = await BookService.addRecordToFirestore(bookId, content, savedAt);
+    final record = {"bookId": bookId, "savedAt": savedAt, "content": content, "recordId": recordId};
+
+    _bookRecords.insert(0, record);
+    book["records"] ??= [];
+    book["records"].insert(0, record);
+    notifyListeners();
+  }
+
+  List<Map<String, dynamic>> getRecordsForBook(String bookId) {
+    return _bookRecords.where((r) => r["bookId"] == bookId).toList();
+  }
+
+  Future<void> deleteRecord(String bookId, String savedAt, String content) async {
+    final index = _bookRecords.indexWhere((r) => r["bookId"] == bookId && r["savedAt"] == savedAt && r["content"] == content);
+    if (index == -1) return;
+
+    final recordId = _bookRecords[index]["recordId"];
+    await BookService.deleteRecordFromFirestore(recordId);
+    _bookRecords.removeAt(index);
+
+    final book = _savedBooks.firstWhere((b) => b["id"] == bookId, orElse: () => {});
+    if (book.isNotEmpty && book["records"] != null) {
+      book["records"].removeWhere((r) => r["savedAt"] == savedAt && r["content"] == content);
+    }
+    notifyListeners();
+  }
+
+  Future<void> updateRecordByContent(String bookId, String oldSavedAt, String oldContent, String newContent) async {
+    final index = _bookRecords.indexWhere((r) => r["bookId"] == bookId && r["savedAt"] == oldSavedAt && r["content"] == oldContent);
+    if (index == -1) return;
+
+    final recordId = _bookRecords[index]["recordId"];
+    final newSavedAt = DateTime.now().toString();
+    await BookService.updateRecordInFirestore(recordId, newContent, newSavedAt);
+
+    _bookRecords[index]["content"] = newContent;
+    _bookRecords[index]["savedAt"] = newSavedAt;
+
+    final book = _savedBooks.firstWhere((b) => b["id"] == bookId, orElse: () => {});
+    if (book.isNotEmpty && book["records"] != null) {
+      final local = (book["records"] as List).firstWhere((r) => r["recordId"] == recordId, orElse: () => {});
+      if (local.isNotEmpty) {
+        local["content"] = newContent;
+        local["savedAt"] = newSavedAt;
+      }
+    }
+    notifyListeners();
+  }
+
+  void updateCategory(String bookId, String newCategory) {
+    final index = _savedBooks.indexWhere((book) => book['id'] == bookId);
+    if (index != -1) {
+      _savedBooks[index]['category'] = newCategory;
+      notifyListeners();
+    }
+  }
+
+  Future<void> assignToLibrary(String bookId, String libraryName) async {
+    final index = _savedBooks.indexWhere((book) => book["id"] == bookId);
+    if (index != -1 && !_savedBooks[index]["customLibraries"].contains(libraryName)) {
+      _savedBooks[index]["customLibraries"].add(libraryName);
+      notifyListeners();
+      await BookService.updateBookInFirestore(bookId, {'customLibraries': _savedBooks[index]["customLibraries"]});
+    }
+  }
+
+  Future<void> addBookToCustomLibrary(String bookId, String libraryName) async {
+    final index = _savedBooks.indexWhere((book) => book["id"] == bookId);
+    if (index != -1) {
+      final customLibraries = _savedBooks[index]["customLibraries"] as List<String>? ?? [];
+      if (!customLibraries.contains(libraryName)) {
+        customLibraries.add(libraryName);
+        _savedBooks[index]["customLibraries"] = customLibraries;
+        notifyListeners();
+        await BookService.updateBookInFirestore(bookId, {'customLibraries': customLibraries});
+      }
+    }
+  }
+
+  Future<void> updateBookDates(String bookId, {String? startDate, String? endDate}) async {
+    final index = _savedBooks.indexWhere((book) => book["id"] == bookId);
+    if (index != -1) {
+      if (startDate != null) _savedBooks[index]["startDate"] = startDate;
+      if (endDate != null) _savedBooks[index]["endDate"] = endDate;
+      notifyListeners();
+      final data = <String, dynamic>{};
+      if (startDate != null) data['startDate'] = startDate;
+      if (endDate != null) data['endDate'] = endDate;
+      await BookService.updateBookInFirestore(bookId, data);
+    }
+  }
+
+  void removeFromLibrary(String bookId, String libraryName) {
+    final index = _savedBooks.indexWhere((book) => book["id"] == bookId);
+    if (index != -1) {
+      _savedBooks[index]["customLibraries"].remove(libraryName);
+      notifyListeners();
+    }
+  }
+
+  void clearAll() {
+    _savedBooks.clear();
+    _bookRecords.clear();
+    notifyListeners();
+  }
+
+  void setBooks(List<Map<String, dynamic>> books) {
+    _savedBooks = books.map((book) {
+      return {
+        ...book,
+        'pageRead': book['pageRead'] ?? 0, // ✅ 로딩 시 기본값 설정
+      };
+    }).toList();
+    notifyListeners();
+  }
+
+  void setRecords(List<Map<String, dynamic>> records) {
+    _bookRecords.clear();
+    _bookRecords.addAll(records);
+    for (final record in records) {
+      final book = _savedBooks.firstWhere((b) => b["id"] == record["bookId"], orElse: () => {});
+      if (book.isNotEmpty) {
+        book["records"] ??= [];
+        final savedAt = record["savedAt"];
+        final exists = (book["records"] as List).any((r) => r["savedAt"] == savedAt && r["content"] == record["content"]);
+        if (!exists) {
+          book["records"].add({"savedAt": savedAt, "content": record["content"], "recordId": record["recordId"]});
+        }
+      }
+    }
+    notifyListeners();
+  }
+
+  /// ✅ 챌린지 진척도 업데이트 (최신 챌린지 모델 대응)
+  Future<void> updateChallengeProgressForNewBook(Map<String, dynamic> book) async {
+    final context = navigatorKey.currentContext;
+    if (context == null) return;
+
+    final challengeProvider = Provider.of<ChallengeProvider>(context, listen: false);
+    final endDateString = book["endDate"];
+    if (endDateString == null) return;
+
+    final endDate = DateTime.tryParse(endDateString)?.toLocal();
+    if (endDate == null) return;
+
+    for (final challenge in challengeProvider.joinedChallenges) {
+      final bookId = book["id"];
+
+      // ✅ 지정 도서 방식
+      if (challenge.method == ChallengeMethod.specificBooks) {
+        final requiredIds = challenge.requiredBooks?.map((b) => b['id']).toSet() ?? {};
+        if (requiredIds.contains(bookId)) {
+          await ChallengeRecordService.saveSpecificBookCheck(challenge.id, bookId, true);
+        }
+      }
+
+      // ✅ 지정 권수 방식
+      if (challenge.method == ChallengeMethod.quantityBased) {
+        if (challenge.period == ChallengePeriod.periodBased &&
+            challenge.startDate != null &&
+            challenge.endDate != null &&
+            endDate.isAfter(challenge.startDate!.subtract(const Duration(days: 1))) &&
+            endDate.isBefore(challenge.endDate!.add(const Duration(days: 1)))) {
+          await ChallengeRecordService.incrementCompletedCount(challenge.id);
+        } else if (challenge.period == ChallengePeriod.daysBased || challenge.period == ChallengePeriod.infinite) {
+          final dateStr = _formatDate(endDate);
+          await ChallengeRecordService.updateChallengeRecord(challenge.id, {"countChecks.$dateStr": true});
+        }
+      }
+
+      // ✅ 상태 새로고침
+      await challengeProvider.refreshChallengeStatus(challenge.id, savedBooks: savedBooks);
+    }
+  }
+
+
+  Future<void> addTimerRecord(String bookId, Map<String, dynamic> record) async {
+    final savedAt = DateTime.now().toIso8601String();
+
+    final recordId = await BookService.addTimerRecordToFirestore(
+      bookId: bookId,
+      content: record['content'],
+      savedAt: savedAt,
+      startTime: record['startTime'],
+      endTime: record['endTime'],
+      durationMinutes: record['durationMinutes'],
+    );
+
+    final fullRecord = {
+      ...record,
+      'bookId': bookId,
+      'savedAt': savedAt,
+      'recordId': recordId,
+    };
+
+    _bookRecords.insert(0, fullRecord);
+
+    final book = _savedBooks.firstWhere((b) => b["id"] == bookId, orElse: () => {});
+    if (book.isNotEmpty) {
+      book["records"] ??= [];
+      book["records"].insert(0, fullRecord);
+    }
+
+    notifyListeners();
+  }
+
+  /// 📌 특정 책의 타이머 기록만 반환
+  List<Map<String, dynamic>> getTimerRecordsForBook(String bookId) {
+    return _bookRecords
+        .where((r) => r["bookId"] == bookId && r["content"] == "독서 타이머 기록")
+        .toList();
+  }
+
+  /// 📌 특정 타이머 기록 삭제
+  Future<void> deleteTimerRecord(String bookId, String recordId) async {
+    _bookRecords.removeWhere((r) => r["recordId"] == recordId);
+
+    final book = _savedBooks.firstWhere((b) => b["id"] == bookId, orElse: () => {});
+    if (book.isNotEmpty) {
+      book["records"]?.removeWhere((r) => r["recordId"] == recordId);
+    }
+
+    await BookService.deleteRecordFromFirestore(recordId);
+    notifyListeners();
+  }
+
+  /// ✅ 날짜별 총 독서 시간 반환 (독서 타이머 기록 기준)
+  Map<String, int> getTotalReadingMinutesByDate() {
+    final Map<String, int> result = {};
+
+    for (final record in _bookRecords) {
+      if (record['content'] == '독서 타이머 기록') {
+        final date = DateTime.tryParse(record['startTime'] ?? '')?.toLocal();
+        final duration = record['durationMinutes'] ?? 0;
+
+        if (date != null) {
+          final dateKey = _formatDate(date);
+          result[dateKey] = (result[dateKey] ?? 0) + (duration as int);
+        }
+      }
+    }
+    return result;
+  }
+
+}

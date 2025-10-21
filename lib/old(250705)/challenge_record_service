@@ -1,0 +1,289 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:dayverse_book/model/base_challenge.dart';
+import 'package:dayverse_book/model/normal_challenge.dart';
+import 'package:dayverse_book/model/stage_challenge.dart';
+import 'package:dayverse_book/model/challenge_attempt_model.dart';
+import 'package:dayverse_book/service/reading_log_service.dart';
+import 'package:flutter/foundation.dart';
+
+class ChallengeRecordService {
+  static final _firestore = FirebaseFirestore.instance;
+  static final _auth = FirebaseAuth.instance;
+
+  /// ✅ 초기 기록 저장
+  static Future<void> saveInitialRecord(
+      BaseChallenge challenge, {
+        int? targetCheckCount,
+        int? selectedDuration,
+        Map<String, dynamic>? additionalFields,
+      }) async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+
+    final docRef = _firestore
+        .collection('users')
+        .doc(uid)
+        .collection('challengeRecords')
+        .doc(challenge.id);
+
+    // ✅ 체크 카운트 계산 (비었을 경우 안전한 fallback 제공)
+    final resolvedTargetCount = targetCheckCount ??
+        (challenge.checkCountOptions?.isNotEmpty == true
+            ? challenge.checkCountOptions!.first
+            : 5); // fallback
+
+    // ✅ 참여 도서 목록 변환
+    final booksAsMap =
+        challenge.participatingBooks?.map((b) => b.toMap()).toList() ?? [];
+
+    // ✅ attempts가 비어있으면 안전하게 초기화
+    final safeAttempts = challenge.attempts.isNotEmpty
+        ? challenge.attempts
+        : [
+      ChallengeAttempt(
+        startDate: challenge.startDate ?? DateTime.now(),
+        endDate: challenge.endDate ?? DateTime.now(),
+        completedBookIds: [],
+        completed: false,
+        isSuccessful: false,
+        stageIndex: 0,
+        selectedDuration: selectedDuration ?? resolvedTargetCount,
+      )
+    ];
+
+    // ✅ stageIndex 계산 (항상 존재 보장)
+    final resolvedStageIndex = safeAttempts.last.stageIndex;
+
+    final initialData = {
+      'countChecks': {},
+      'specificBookChecks': {},
+      'routineChecks': {},
+      'dailyMinutes': {},
+      'pageCounts': {},
+      'completedCount': 0,
+      'participatingBooks': booksAsMap,
+      'attempts': safeAttempts.map((e) => e.toMap()).toList(),
+      'startDate': challenge.startDate?.toIso8601String(),
+      'endDate': challenge.endDate?.toIso8601String(),
+      'routineStartDate':
+      challenge.startDate?.toIso8601String() ?? DateTime.now().toIso8601String(),
+      'selectedDuration': selectedDuration ?? resolvedTargetCount,
+      'targetCheckCount': resolvedTargetCount,
+      'stageIndex': resolvedStageIndex,
+    };
+
+    // ✅ 추가 필드 병합 + 중복 방지
+    final dataToSave = {
+      'isJoined': true,
+      ...initialData,
+      if (additionalFields != null) ...additionalFields,
+      'isJoined': true, // ✅ 마지막에 다시 덮어쓰기 보장
+    };
+
+    debugPrint('[SAVE] Final Data for ${challenge.title}: $dataToSave');
+    await docRef.set(dataToSave, SetOptions(merge: true));
+  }
+
+  /// ✅ 루틴 체크 + dailyMinutes 저장 (타이머 기반 루틴 챌린지)
+  static Future<void> saveRoutineCheck(String challengeId, DateTime date, bool isChecked, {int minutes = 0}) async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+
+    final dateKey = "${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}";
+
+    final docRef = _firestore.collection('users').doc(uid).collection('challengeRecords').doc(challengeId);
+
+    final snapshot = await docRef.get();
+    final data = snapshot.data() ?? {};
+
+    final routineChecks = Map<String, dynamic>.from(data['routineChecks'] ?? {});
+    routineChecks[dateKey] = isChecked;
+
+    final dailyMinutes = Map<String, dynamic>.from(data['dailyMinutes'] ?? {});
+    dailyMinutes[dateKey] = minutes;
+
+    int completedCount = (data['completedCount'] as int?) ?? 0;
+    if (isChecked) {
+      if ((data['routineChecks']?[dateKey] ?? false) != true) {
+        completedCount += 1;
+      }
+    }
+
+    final updatedData = {
+      ...data,
+      'routineChecks': routineChecks,
+      'dailyMinutes': dailyMinutes,
+      'completedCount': completedCount,
+    };
+
+    await docRef.set(updatedData, SetOptions(merge: true));
+    print("[SAVE] saveRoutineCheck: date=$dateKey, isChecked=$isChecked, minutes=$minutes, completedCount=$completedCount");
+
+    // ✅ 추가: 저장 후 최신 데이터로 상태 갱신 (외부에서 호출해야 함!)
+  }
+
+  /// ✅ fetchChallengeRecord: dailyMinutes 포함 반환
+  static Future<Map<String, dynamic>> fetchChallengeRecord(String challengeId) async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return {};
+
+    final doc = await _firestore
+        .collection('users')
+        .doc(uid)
+        .collection('challengeRecords')
+        .doc(challengeId)
+        .get();
+    final data = doc.data() ?? {};
+
+    //debugPrint("🐾 [fetchChallengeRecord] $challengeId → $data");
+
+    // ✅ 안전하게 디폴트 값 주입
+    return Map<String, dynamic>.from(data);
+  }
+
+  /// ✅ 나머지 메서드는 그대로 유지 (count, page, specific 등)
+  static Future<void> saveCountCheck(
+      String challengeId, DateTime date, bool isChecked) async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+
+    final formattedDate = _formatDate(date);
+
+    await _firestore
+        .collection('users')
+        .doc(uid)
+        .collection('challengeRecords')
+        .doc(challengeId)
+        .set({
+      'countChecks': {formattedDate: isChecked},
+    }, SetOptions(merge: true));
+  }
+
+  static Future<void> saveSpecificBookCheck(
+      String challengeId, String bookId, bool isChecked) async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+
+    await _firestore
+        .collection('users')
+        .doc(uid)
+        .collection('challengeRecords')
+        .doc(challengeId)
+        .set({
+      'specificBookChecks.$bookId': isChecked,
+    }, SetOptions(merge: true));
+  }
+
+  static Future<void> savePageCount(
+      String challengeId, DateTime date, int pageCount) async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+
+    final dateKey = _formatDate(date);
+
+    final docRef = _firestore
+        .collection('users')
+        .doc(uid)
+        .collection('challengeRecords')
+        .doc(challengeId);
+
+    final snapshot = await docRef.get();
+    final data = snapshot.data() ?? {};
+    final pageCounts = Map<String, int>.from(data['pageCounts'] ?? {});
+    pageCounts[dateKey] = pageCount;
+
+    await docRef.set({
+      'pageCounts': pageCounts,
+    }, SetOptions(merge: true));
+  }
+
+  static Future<void> incrementCompletedCount(String challengeId) async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+
+    final docRef = _firestore
+        .collection('users')
+        .doc(uid)
+        .collection('challengeRecords')
+        .doc(challengeId);
+
+    await _firestore.runTransaction((transaction) async {
+      final snapshot = await transaction.get(docRef);
+      final currentCount = snapshot.data()?['completedCount'] ?? 0;
+      transaction.set(docRef, {
+        'completedCount': currentCount + 1,
+      }, SetOptions(merge: true));
+    });
+  }
+
+  static Future<void> updateChallengeRecord(
+      String challengeId,
+      Map<String, dynamic> updatedFields,
+      ) async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+
+    // ✅ stageIndex가 포함되었는지 확인 (위에서 항상 넣어주므로 별도 수정 필요 없음)
+    await _firestore
+        .collection('users')
+        .doc(uid)
+        .collection('challengeRecords')
+        .doc(challengeId)
+        .set(updatedFields, SetOptions(merge: true));
+  }
+
+  static Future<void> deleteChallengeRecord(String challengeId) async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+
+    await _firestore
+        .collection('users')
+        .doc(uid)
+        .collection('challengeRecords')
+        .doc(challengeId)
+        .delete();
+  }
+
+  static String _formatDate(DateTime date) {
+    return "${date.year}-${_twoDigits(date.month)}-${_twoDigits(date.day)}";
+  }
+
+  static String _twoDigits(int n) => n.toString().padLeft(2, '0');
+
+  static Future<void> saveBookReadPages(
+      String challengeId, String bookId, int pageCount) async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+
+    final docRef = _firestore
+        .collection('users')
+        .doc(uid)
+        .collection('challengeRecords')
+        .doc(challengeId);
+
+    final snapshot = await docRef.get();
+    final data = snapshot.data() ?? {};
+    final bookReadPages = Map<String, int>.from(data['bookReadPages'] ?? {});
+    bookReadPages[bookId] = pageCount;
+
+    await docRef.set({
+      'bookReadPages': bookReadPages,
+    }, SetOptions(merge: true));
+  }
+
+  /// ✅ 전체 recordData 저장 (예: stageIndex, startDate 갱신 등)
+  static Future<void> saveChallengeRecord(String challengeId, Map<String, dynamic> recordData) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    final docRef = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('challengeRecords')
+        .doc(challengeId);
+
+    await docRef.set(recordData, SetOptions(merge: true));
+  }
+
+}

@@ -1,0 +1,856 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:dayverse_book/model/challenge_model.dart';
+import 'package:dayverse_book/old(250615)/challenge_provider.dart';
+import 'package:dayverse_book/widget/search_box_with_results.dart';
+import 'package:dayverse_book/constants/dummy_book_list.dart';
+import 'package:dayverse_book/screen/challenge_ongoing_screen.dart';
+import 'package:dayverse_book/provider/saved_books_provider.dart';
+import 'package:dayverse_book/utils/challenge_stage_utils.dart';
+import 'package:dayverse_book/utils/challenge_check_utils.dart';
+import 'package:dayverse_book/model/book_model.dart';
+import 'package:dayverse_book/service/challenge_record_service.dart';
+import 'package:dayverse_book/service/book_api_service.dart';
+
+
+class ChallengeDetailScreen extends StatefulWidget {
+  final Challenge challenge;
+  const ChallengeDetailScreen({super.key, required this.challenge});
+
+
+  @override
+  State<ChallengeDetailScreen> createState() => _ChallengeDetailScreenState();
+}
+
+class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
+  List<BookModel> detailedRequiredBooks = [];
+
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRequiredBookDetails();
+  }
+
+  Future<void> _loadRequiredBookDetails() async {
+    final rawBooks = widget.challenge.requiredBooks ?? [];
+    debugPrint("[DEBUG] requiredBooks: $rawBooks");
+
+    final result = await fetchRequiredBooksFromApi(rawBooks);
+    debugPrint("[DEBUG] detailedRequiredBooks length: ${result.length}");
+
+    setState(() {
+      detailedRequiredBooks = result;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+
+    final challengeProvider = Provider.of<ChallengeProvider>(context);
+    final latestChallenge = challengeProvider.findChallengeById(widget.challenge.id);
+
+
+    return GestureDetector(
+      onHorizontalDragUpdate: (details) {
+        if (details.delta.dx > 20) {
+          Navigator.pop(context);
+        }
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFF013328),
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.white),
+            onPressed: () => Navigator.pop(context),
+          ),
+          centerTitle: true,
+          title: Text(
+            latestChallenge.title,
+            style: const TextStyle(
+              color: Colors.white,
+              fontFamily: 'kopub',
+              fontSize: 20,
+            ),
+          ),
+        ),
+        body: Stack(
+          children: [
+            SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildImage(latestChallenge.imageUrl, context),
+                  const SizedBox(height: 20),
+                  const Divider(color: Colors.white24),
+                  const SizedBox(height: 10),
+                  Text(
+                    latestChallenge.title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontFamily: 'kopub',
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  _buildSummaryCard(latestChallenge),
+                  const SizedBox(height: 16),
+
+                  if (latestChallenge.method == ChallengeMethod.specificBooks &&
+                      !latestChallenge.forceBookSelection &&
+                      (latestChallenge.requiredBooks?.isNotEmpty ?? false))
+                    _buildSpecificBookSection(latestChallenge, Provider.of<SavedBooksProvider>(context).savedBooks, detailedRequiredBooks),
+
+                  const SizedBox(height: 10),
+                  const Divider(color: Colors.white24),
+                  const SizedBox(height: 16),
+                  if (latestChallenge.longDescription != null && latestChallenge.longDescription!.isNotEmpty)
+                    _buildDescriptionSection("📖 챌린지 소개", latestChallenge.longDescription!),
+                  if (latestChallenge.goalDescription != null && latestChallenge.goalDescription!.isNotEmpty)
+                    _buildDescriptionSection("🎯 챌린지 목표", latestChallenge.goalDescription!),
+                  if (latestChallenge.recommendedFor != null && latestChallenge.recommendedFor!.isNotEmpty)
+                    _buildDescriptionSection("🙋 이런 분께 추천", latestChallenge.recommendedFor!),
+                  if (latestChallenge.guideText != null && latestChallenge.guideText!.isNotEmpty)
+                    _buildDescriptionSection("📌 진행 방법", latestChallenge.guideText!),
+                  const SizedBox(height: 100),
+                ],
+              ),
+            ),
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 40.0),
+                child: SizedBox(
+                  width: MediaQuery.of(context).size.width * 0.9,
+                  child: ElevatedButton(
+                    onPressed: () async {
+                      if (latestChallenge == null) {
+                        debugPrint("❌ 해당 챌린지를 Provider에서 찾을 수 없습니다.");
+                        return;
+                      }
+
+                      showDialog(
+                        context: context,
+                        builder: (ctx) => ChallengeParticipationDialog(
+                          challenge: latestChallenge,
+                          stageIndex: latestChallenge.isStaged ? latestChallenge.currentStageIndex : null,
+                          selectedDuration: latestChallenge.isStaged ? latestChallenge.currentStageDuration : null,
+                        ),
+                      );
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.amberAccent,
+                      padding: const EdgeInsets.symmetric(vertical: 18),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    ),
+                    child: const Text("챌린지 참여하기",
+                        style: TextStyle(
+                            fontSize: 18, fontFamily: 'kopub', fontWeight: FontWeight.bold, color: Colors.black)),
+                  ),
+                ),
+              ),
+            )
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildImage(String imageUrl, BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: Image.asset(
+        imageUrl,
+        width: screenWidth,
+        height: screenWidth * 1, // 여기 비율 조절 가능 (0.5 ~ 0.6 추천)
+        fit: BoxFit.cover,
+        alignment: Alignment.bottomCenter,
+        errorBuilder: (_, __, ___) => Container(
+          width: screenWidth,
+          height: screenWidth * 0.3, // 오류 시에도 비율 기반
+          color: Colors.grey,
+          child: const Icon(Icons.flag, color: Colors.white, size: 50),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSummaryCard(Challenge challenge) {
+    final typeText = _getChallengeTypeText(challenge.type);
+    final autoCheckHint = _getAutoCheckHint(challenge);
+
+    return Column(
+      children: [
+        if (autoCheckHint.isNotEmpty)
+          Container(
+            margin: const EdgeInsets.only(bottom: 16),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white12,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.info_outline, color: Colors.amberAccent, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    autoCheckHint,
+                    style: const TextStyle(color: Colors.amberAccent, fontSize: 14, fontFamily: 'kopub'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+        _buildInfoCard("💡 한줄 소개", challenge.shortDescription),
+        if (challenge.isStaged)
+          _buildStageInfoCard(challenge),
+        //_buildInfoCard("📂 챌린지 유형", typeText),
+        _buildInfoCard("🎯 도전 목표", challenge.goalDisplayText ?? "도전 목표 미정"),
+        _buildInfoCard("🗓 도전 기간", challenge.periodDisplayText ?? "기간 미정"),
+        _buildInfoCard("🏅 리워드", challenge.rewardTitle),
+      ],
+    );
+  }
+
+  String _getAutoCheckHint(Challenge challenge) {
+    final actionType = getChallengeCheckActionType(challenge);
+
+    switch (actionType) {
+      case ChallengeCheckActionType.timerAuto:
+        return "⏱ 타이머 기반으로 자동 체크되는 챌린지예요.";
+      case ChallengeCheckActionType.pageAuto:
+        return "📖 페이지 수를 입력해서 자동으로 체크되는 챌린지예요.";
+      case ChallengeCheckActionType.libraryAuto:
+        return "📚 서재 연동을 통해 자동으로 체크되는 챌린지예요.";
+      default:
+        return "";
+    }
+  }
+
+  String _getChallengeTypeText(ChallengeType type) {
+    switch (type) {
+      case ChallengeType.routine:
+        return "루틴 챌린지";
+      case ChallengeType.growth:
+        return "성장 챌린지";
+    }
+  }
+
+  Widget _buildDescriptionSection(String title, String content) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white10,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        fontFamily: 'kopub')),
+                const SizedBox(height: 6),
+                Text(content,
+                    style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 15,
+                        height: 1.4,
+                        fontFamily: 'kopub')),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoCard(String title, String value) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(12)),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(title,
+              style: const TextStyle(
+                  color: Colors.white70, fontFamily: 'kopub', fontSize: 16, fontWeight: FontWeight.bold)),
+          Flexible(
+            child: Text(value,
+                textAlign: TextAlign.right,
+                style: const TextStyle(color: Colors.white, fontFamily: 'kopub', fontSize: 16)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStageInfoCard(Challenge challenge) {
+    if (challenge.stageType != ChallengeStageType.staged) return const SizedBox.shrink();
+
+    final int stageIndex = challenge.currentStageIndex;
+    final int? stageDays = challenge.currentStageDuration;
+
+    final stageText = "${stageIndex + 1}단계";
+    final stageLabel = stageDays != null ? "[$stageText] - $stageDays일 루틴" : stageText;
+
+    return _buildInfoCard("🧗 현재 스테이지", stageLabel);
+  }
+
+  Widget _buildDescriptionSectionWithWidget({required String title, required Widget contentWidget,}) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white10,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  fontFamily: 'kopub')),
+          const SizedBox(height: 12),
+          contentWidget,
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSpecificBookSection(Challenge challenge, List<BookModel> savedBooks, List<BookModel> detailedRequiredBooks,) {
+    final readBookIds = savedBooks
+        .where((book) => book.category == 'done')
+        .map((book) => book.id)
+        .toSet();
+
+    return _buildDescriptionSectionWithWidget(
+      title: "📖 읽을 책 목록",
+      contentWidget: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: detailedRequiredBooks.map((book) {
+          final isRead = readBookIds.contains(book.id);
+
+          return Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+            decoration: BoxDecoration(
+              color: isRead ? Colors.green.withOpacity(0.2) : Colors.white10,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  isRead ? Icons.check_circle : Icons.radio_button_unchecked,
+                  color: isRead ? Colors.greenAccent : Colors.white38,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    "${book.title} (${book.author})",
+                    style: const TextStyle(color: Colors.white, fontFamily: 'kopub', fontSize: 15),
+                  ),
+                ),
+                if (book.pageCount > 0)
+                  Text(
+                    "${book.pageCount}쪽",
+                    style: const TextStyle(color: Colors.white54, fontSize: 13),
+                  ),
+              ],
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+}
+
+
+
+/// 참여 다이얼로그
+
+
+class ChallengeParticipationDialog extends StatefulWidget {
+  final Challenge challenge;
+  final int? stageIndex; // ✅ 추가
+  final int? selectedDuration; // ✅ 추가
+
+  const ChallengeParticipationDialog({
+    super.key,
+    required this.challenge,
+    this.stageIndex,
+    this.selectedDuration,
+  });
+
+  @override
+  State<ChallengeParticipationDialog> createState() => _ChallengeParticipationDialogState();
+}
+
+class _ChallengeParticipationDialogState extends State<ChallengeParticipationDialog> {
+  int? selectedDuration;
+  DateTime? selectedStartDate;
+  List<BookModel> searchResults = [];
+  List<BookModel> selectedBooks = [];
+  final TextEditingController searchController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+
+    if (widget.selectedDuration != null) {
+      selectedDuration = widget.selectedDuration;
+    } else if (widget.challenge.isStaged && widget.challenge.stageDurations.isNotEmpty) {
+      final stage = widget.stageIndex ?? widget.challenge.currentStageIndex;
+      selectedDuration = widget.challenge.stageDurations[stage];
+    } else if (isInfiniteCountBased && widget.challenge.checkCountOptions?.isNotEmpty == true) {
+      selectedDuration = widget.challenge.checkCountOptions!.first;
+    } else if (widget.challenge.durationOptions?.isNotEmpty == true) {
+      selectedDuration = widget.challenge.durationOptions!.first;
+    } else {
+      selectedDuration = null;
+    }
+  }
+
+  bool get allowsDurationSelection =>
+      !widget.challenge.isStaged &&
+          (widget.challenge.durationOptions?.length ?? 0) > 1;
+
+  bool get needsStartDate =>
+      widget.challenge.type == ChallengeType.routine &&
+          widget.challenge.period == ChallengePeriod.daysBased;
+
+  bool get isInfiniteCountBased =>
+      widget.challenge.method == ChallengeMethod.countBased &&
+          widget.challenge.period == ChallengePeriod.infinite;
+
+  bool get allowsUserBookSelection =>
+      widget.challenge.method == ChallengeMethod.specificBooks &&
+          widget.challenge.specificBookMode == SpecificBookMode.userDefined;
+
+  void onSearchChanged(String keyword) async {
+    if (keyword.trim().isEmpty) {
+      setState(() {
+        searchResults = [];
+      });
+      return;
+    }
+
+    try {
+      final results = await BookApiService.searchBooks(keyword);
+      setState(() {
+        searchResults = results;
+      });
+    } catch (e) {
+      debugPrint("도서 검색 API 오류: $e");
+      setState(() {
+        searchResults = [];
+      });
+      _showSnackBar("도서 검색 중 문제가 발생했습니다.");
+    }
+  }
+
+  void onBookSelected(BookModel book) {
+    print("[SELECTED] ${book.title}");  // 🔥 여기에 찍어!
+    setState(() {
+      if (!selectedBooks.any((b) => b.id == book.id)) {
+        selectedBooks.add(book);
+      }
+    });
+  }
+
+  void onBookRemoved(BookModel book) {
+    setState(() {
+      selectedBooks.removeWhere((b) => b.id == book.id);
+    });
+  }
+
+  void _showSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  void _handleJoin() async {
+    final challengeProvider = Provider.of<ChallengeProvider>(context, listen: false);
+    final savedBooksProvider = Provider.of<SavedBooksProvider>(context, listen: false);
+
+    final origin = challengeProvider.findChallengeById(widget.challenge.id);
+    if (origin == null) {
+      _showSnackBar("챌린지 정보를 불러올 수 없습니다.");
+      return;
+    }
+
+    final challenge = origin;
+
+    if (!challenge.isStaged &&
+        (challenge.durationOptions?.isNotEmpty ?? false) &&
+        selectedDuration == null) {
+      _showSnackBar("도전 기간(횟수)을 선택해주세요.");
+      return;
+    }
+
+    final isUserSpecificBookChallenge =
+        challenge.method == ChallengeMethod.specificBooks &&
+            challenge.specificBookMode == SpecificBookMode.userDefined;
+
+    if (needsStartDate && selectedStartDate == null) {
+      _showSnackBar("도전 시작일을 선택해주세요.");
+      return;
+    }
+
+    if (isUserSpecificBookChallenge && selectedBooks.isEmpty) {
+      _showSnackBar("도전에 사용할 책을 한 권 선택해주세요.");
+      return;
+    }
+
+    final useDefaultStartDate = challenge.period == ChallengePeriod.periodBased && challenge.startDate != null;
+    final finalStartDate = useDefaultStartDate ? challenge.startDate! : (selectedStartDate ?? DateTime.now());
+
+    // ✅ 사용자 지정 도서 서재 등록
+    if (isUserSpecificBookChallenge) {
+      for (final book in selectedBooks) {
+        final bookModel = book.copyWith(
+          category: 'reading',
+          startDate: finalStartDate,
+        );
+        savedBooksProvider.addOrUpdateBook(bookModel);
+      }
+    }
+
+    // ✅ 스테이지 기반이라면 첫 번째 스테이지 duration 사용
+    final stageIdx = widget.stageIndex ?? 0;
+    final effectiveDuration = challenge.isStaged
+        ? challenge.stageDurations[stageIdx]
+        : selectedDuration;
+
+    // ✅ ChallengeProvider에 참여 요청
+    debugPrint("[JOIN] 참여 요청 시작: ${challenge.title}");
+    await challengeProvider.joinChallenge(
+      challenge,
+      startDate: finalStartDate,
+      duration: effectiveDuration,
+      targetCheckCount: effectiveDuration,
+      participatingBooks: isUserSpecificBookChallenge ? selectedBooks : null,
+    );
+
+    // ✅ ChallengeProvider 상태 갱신
+    debugPrint("[JOIN] 참여 후 상태 갱신 시도...");
+    await challengeProvider.refreshJoinedChallenges();
+
+    final latestChallenge = challengeProvider.findChallengeById(challenge.id);
+    debugPrint("[JOIN] 최신 challenge 확인: ${latestChallenge?.isJoined} / ${latestChallenge?.title}");
+
+    if (!mounted || latestChallenge == null) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        Future.delayed(const Duration(seconds: 2), () {
+          if (context.mounted) {
+            Navigator.of(context).pop();
+            Navigator.pushAndRemoveUntil(
+              context,
+              MaterialPageRoute(builder: (_) => ChallengeOngoingScreen(challenge: latestChallenge)),
+                  (route) => false,
+            );
+          }
+        });
+
+        return AlertDialog(
+          backgroundColor: Colors.greenAccent,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          content: Row(
+            children: [
+              const Icon(Icons.emoji_events, color: Colors.deepPurple, size: 36),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  "'${challenge.title}'\n도전을 시작했습니다!\n응원합니다 💪",
+                  style: const TextStyle(
+                    color: Colors.black,
+                    fontFamily: 'kopub',
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: const Color(0xFF0A1D27),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 80),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: SizedBox(
+        width: MediaQuery.of(context).size.width,
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  "챌린지 참여 설정",
+                  style: TextStyle(
+                    fontFamily: 'kopub',
+                    fontWeight: FontWeight.bold,
+                    fontSize: 22,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                if (isInfiniteCountBased)
+                  _buildCheckCountSelection(widget.challenge.checkCountOptions ?? []),
+
+                _buildDurationSection(),
+
+                if (needsStartDate)
+                  _buildStartDateSelection(),
+
+                if (allowsUserBookSelection)
+                  _buildBookSelection(),
+
+                const SizedBox(height: 20),
+                _buildJoinButton(),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+
+  Widget _buildDurationSection() {
+    if (widget.challenge.isStaged && widget.challenge.stageDurations.isNotEmpty) {
+      return _buildStageDurationText();
+    }
+
+    if (widget.challenge.period == ChallengePeriod.periodBased &&
+        widget.challenge.startDate != null &&
+        widget.challenge.endDate != null) {
+      final start = widget.challenge.startDate!;
+      final end = widget.challenge.endDate!;
+      return _buildDurationText("${start.year}.${start.month}.${start.day} ~ ${end.year}.${end.month}.${end.day}");
+    }
+
+    if (widget.challenge.period == ChallengePeriod.infinite) {
+      return _buildDurationText("목표 도전 횟수 달성 시까지");
+    }
+
+    if (widget.challenge.period == ChallengePeriod.daysBased) {
+      final durations = widget.challenge.durationOptions ?? [];
+      if (durations.length <= 1) {
+        final days = durations.isNotEmpty ? durations.first : 1;
+        return _buildDurationText("$days일");
+      } else {
+        return _buildDurationSelection(durations);
+      }
+    }
+
+    return _buildDurationText("기간 미정");
+  }
+  Widget _buildStageDurationText() {
+    final stageIndex = widget.stageIndex ?? widget.challenge.currentStageIndex;
+    final duration = widget.challenge.stageDurations[stageIndex];
+    return _buildDurationText("[${stageIndex + 1}단계] $duration일 루틴");
+  }
+
+  Widget _buildDurationText(String text) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Column(
+          children: [
+            Text("🔸도전 기간: $text",
+                style: const TextStyle(fontFamily: 'kopub', color: Colors.white, fontSize: 18)),
+            const SizedBox(height: 24),
+          ]
+      ),
+
+    );
+  }
+
+  Widget _buildDurationSelection(List<int> durations) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text("🔸도전 기간 선택", style: TextStyle(fontFamily: 'kopub', color: Colors.white, fontSize: 18)),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: durations.map((days) {
+            final isSelected = selectedDuration == days;
+            return GestureDetector(
+              onTap: () => setState(() => selectedDuration = days),
+              child: Container(
+                width: 80,
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                decoration: BoxDecoration(
+                  color: isSelected ? Colors.amberAccent : Colors.white10,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Center(
+                  child: Text(
+                    "$days일",
+                    style: TextStyle(
+                      color: isSelected ? Colors.black : Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+
+  Widget _buildStartDateSelection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text("🔸도전 시작일 선택", style: TextStyle(fontFamily: 'kopub', color: Colors.white, fontSize: 18)),
+        const SizedBox(height: 10),
+        GestureDetector(
+          onTap: () async {
+            final picked = await showDatePicker(
+              context: context,
+              initialDate: DateTime.now(),
+              firstDate: DateTime.now(),
+              lastDate: DateTime.now().add(const Duration(days: 365)),
+            );
+            if (picked != null) setState(() => selectedStartDate = picked);
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 20),
+            decoration: BoxDecoration(
+              color: Colors.white10,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              selectedStartDate != null
+                  ? "${selectedStartDate!.year}년 ${selectedStartDate!.month}월 ${selectedStartDate!.day}일"
+                  : "시작일을 선택해주세요",
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+
+  Widget _buildCheckCountSelection(List<int> counts) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text("🔸도전 횟수 선택", style: TextStyle(fontFamily: 'kopub', color: Colors.white, fontSize: 18)),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: counts.map((count) {
+            final isSelected = selectedDuration == count;
+            return GestureDetector(
+              onTap: () => setState(() => selectedDuration = count),
+              child: Container(
+                width: 80,
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                decoration: BoxDecoration(
+                  color: isSelected ? Colors.amberAccent : Colors.white10,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Center(
+                  child: Text("$count회", style: TextStyle(color: isSelected ? Colors.black : Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+
+  Widget _buildBookSelection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text("🔸어떤 책으로 도전할지 미리 정해볼까요?",
+            style: TextStyle(fontFamily: 'kopub', fontSize: 18, color: Colors.white)),
+        const SizedBox(height: 6),
+        Text(
+          widget.challenge.forceBookSelection
+              ? "    ※ 이 챌린지는 책을 선택해야 도전할 수 있어요."
+              : "    ※ 선택하지 않아도 도전 가능해요!\n    하지만 미리 책을 정하면 성공 확률이 높아져요.\n    선택한 책은 '읽는 중인 책'으로 서재에 자동 등록됩니다.",
+          style: TextStyle(
+            fontFamily: 'kopub',
+            color: widget.challenge.forceBookSelection ? Colors.redAccent : Colors.amberAccent,
+            fontSize: 14,
+            height: 1.4,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 15),
+        Container(
+          constraints: const BoxConstraints(maxHeight: 250),
+          child: SingleChildScrollView(
+              child: SearchBoxWithResults(
+                searchController: searchController,
+                searchResults: searchResults,
+                selectedBooks: selectedBooks,
+                onSearchChanged: onSearchChanged,
+                onBookSelected: onBookSelected,
+                onBookRemoved: onBookRemoved,
+              )
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildJoinButton() {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton(
+        onPressed: _handleJoin,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.amberAccent,
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+        child: const Text("도전하기", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black)),
+      ),
+    );
+  }
+
+}

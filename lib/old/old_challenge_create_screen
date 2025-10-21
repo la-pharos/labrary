@@ -1,0 +1,633 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:dayverse_book/model/challenge_model.dart';
+import 'package:dayverse_book/screen/challenge_ongoing_screen.dart';
+import 'package:provider/provider.dart';
+import 'package:dayverse_book/provider/challenge_provider.dart';
+import 'package:dayverse_book/provider/saved_books_provider.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:io';
+import 'package:dayverse_book/utils/book_utils.dart';
+
+class ChallengeCreateScreen extends StatefulWidget {
+  const ChallengeCreateScreen({super.key});
+
+  @override
+  _ChallengeCreateScreenState createState() => _ChallengeCreateScreenState();
+}
+
+class _ChallengeCreateScreenState extends State<ChallengeCreateScreen> {
+  final _titleController = TextEditingController();
+  final _descriptionController = TextEditingController();
+  final _totalBooksController = TextEditingController();
+  final _searchController = TextEditingController();
+  List<Map<String, String>> _searchResults = []; // 검색 결과 저장 리스트
+
+  ChallengeType _selectedType = ChallengeType.totalBooks;
+  DateTime? _startDate;
+  DateTime? _endDate;
+  File? _selectedImage;
+
+  List<Map<String, String>> _specificBooks = [];
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onHorizontalDragUpdate: (details) {
+        if (details.delta.dx > 10) {
+          Navigator.pop(context);
+        }
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFF013328),
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.white),
+            onPressed: () => Navigator.pop(context),
+          ),
+          title: const Text(
+            "챌린지 생성하기",
+            style: TextStyle(
+                color: Colors.white,
+                fontFamily: 'kopub',
+                fontWeight: FontWeight.bold),
+          ),
+        ),
+        body: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text("1. 챌린지 제목",
+                  style: TextStyle(
+                      color: Colors.white, fontFamily: 'kopub', fontSize: 16)),
+              const SizedBox(height: 8),
+              _buildTextField("챌린지 이름을 입력하세요", _titleController),
+              const SizedBox(height: 20),
+              const Text("2. 챌린지 유형",
+                  style: TextStyle(
+                      color: Colors.white, fontFamily: 'kopub', fontSize: 16)),
+              const SizedBox(height: 8),
+              _buildChallengeTypeSelector(),
+              const SizedBox(height: 20),
+              if (_selectedType == ChallengeType.specificBooks)
+                _buildSpecificBooksInput(),
+              const Text("3. 총 권수",
+                  style: TextStyle(
+                      color: Colors.white, fontFamily: 'kopub', fontSize: 16)),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _totalBooksController
+                  ..text = _selectedType == ChallengeType.specificBooks
+                      ? _specificBooks.length.toString()
+                      : _totalBooksController.text,
+                readOnly: _selectedType == ChallengeType.specificBooks,
+                keyboardType: TextInputType.number,
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly
+                ], // ✅ 숫자만 입력
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: _selectedType == ChallengeType.specificBooks
+                      ? "지정 도서 수에 따라 자동 입력됩니다"
+                      : "총 몇 권인지 입력하세요 (숫자)",
+                  hintStyle: const TextStyle(color: Colors.white54),
+                  filled: true,
+                  fillColor: Colors.white12,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              _buildDateSelector(),
+              const SizedBox(height: 20),
+              const Text("5. 챌린지 설명",
+                  style: TextStyle(
+                      color: Colors.white, fontFamily: 'kopub', fontSize: 16)),
+              const SizedBox(height: 8),
+              _buildTextField("챌린지에 대해 설명해주세요", _descriptionController,
+                  maxLines: 3),
+              const SizedBox(height: 20),
+              _buildImagePickerSection(),
+              const SizedBox(height: 20),
+              _buildSubmitButton(),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTextField(String hintText, TextEditingController controller,
+      {bool isNumber = false, int maxLines = 1}) {
+    return TextField(
+      controller: controller,
+      keyboardType: isNumber ? TextInputType.number : TextInputType.text,
+      maxLines: maxLines,
+      style: const TextStyle(color: Colors.white),
+      decoration: InputDecoration(
+        hintText: hintText,
+        hintStyle: const TextStyle(color: Colors.white54),
+        filled: true,
+        fillColor: Colors.white12,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide.none,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChallengeTypeSelector() {
+    return DropdownButtonFormField<ChallengeType>(
+      value: _selectedType,
+      dropdownColor: const Color(0xFF013328),
+      decoration: InputDecoration(
+        filled: true,
+        fillColor: Colors.white12,
+        border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide.none),
+      ),
+      style: const TextStyle(color: Colors.white),
+      items: const [
+        DropdownMenuItem(
+          value: ChallengeType.totalBooks,
+          child: Text("총 권수 챌린지",
+              style: TextStyle(
+                color: Colors.white,
+                fontFamily: 'kopub',
+              )),
+        ),
+        DropdownMenuItem(
+          value: ChallengeType.specificBooks,
+          child: Text("지정도서 챌린지",
+              style: TextStyle(
+                color: Colors.white,
+                fontFamily: 'kopub',
+              )),
+        ),
+      ],
+      onChanged: (value) {
+        setState(() {
+          _selectedType = value!;
+        });
+      },
+    );
+  }
+
+  Widget _buildDateSelector() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text("4. 도전 기간",
+            style: TextStyle(
+                color: Colors.white, fontFamily: 'kopub', fontSize: 16)),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: TextButton(
+                onPressed: () => _pickDate(isStart: true),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  backgroundColor: Colors.white12,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                ),
+                child: Text(
+                  "시작일: ${_formatDate(_startDate)}",
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontFamily: 'kopub',
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: TextButton(
+                onPressed:
+                    _startDate == null ? null : () => _pickDate(isStart: false),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  backgroundColor:
+                      _startDate == null ? Colors.white10 : Colors.white12,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                ),
+                child: Text(
+                  "종료일: ${_formatDate(_endDate)}",
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontFamily: 'kopub',
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Future<void> _pickDate({required bool isStart}) async {
+    DateTime now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: now,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+    if (picked != null) {
+      setState(() {
+        if (isStart) {
+          _startDate = picked;
+          if (_endDate != null && _endDate!.isBefore(_startDate!)) {
+            _endDate = null;
+          }
+        } else {
+          _endDate = picked;
+        }
+      });
+    }
+  }
+
+  String _formatDate(DateTime? date) {
+    if (date == null) return "날짜 선택";
+    return "${date.year}.${date.month.toString().padLeft(2, '0')}.${date.day.toString().padLeft(2, '0')}";
+  }
+
+  Widget _buildSpecificBooksInput() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text("2-2. 지정 도서 입력",
+            style: TextStyle(color: Colors.white, fontFamily: 'kopub', fontSize: 16)),
+        const SizedBox(height: 8),
+
+        SearchBoxWithResults(
+          searchController: _searchController,
+          searchResults: _searchResults,
+          selectedBooks: _specificBooks,    // ✅ 요거 추가!!
+          onSearchChanged: _onSearchChanged,
+          onBookSelected: _addSpecificBook,
+          onBookRemoved: _removeSpecificBook,
+        ),
+
+        const SizedBox(height: 20),
+      ],
+    );
+  }
+
+
+  void _onSearchChanged(String query) {
+    // ✨ 여기서 책 더미 데이터 기반 검색
+    final dummyBooks = [
+      {"title": "그릿", "author": "앤절라 더크워스", "isbn": "9791162540633"},
+      {"title": "차라투스트라는 이렇게 말했다", "author": "프리드리히 니체", "isbn": "9788991799375"},
+      {"title": "니체의 말", "author": "프리드리히 니체", "isbn": "788970123456"},
+      {"title": "도덕의 계보", "author": "프리드리히 니체", "isbn": "65498498"},
+      {
+        "title": "good_test",
+        "author": "asd",
+        "publisher": "good_test",
+        "isbn": "91130620456",
+        "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/6/65/No-Image-Placeholder.svg", // ✅ 변경된 이미지 URL
+        "description": "청소년을 위한 그릿의 가치와 적용법을 설명한 책.",
+      },
+      {
+        "title": "good_test2",
+        "author": "aaadd",
+        "publisher": "good_test2",
+        "isbn": "1130620456",
+        "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/6/65/No-Image-Placeholder.svg", // ✅ 변경된 이미지 URL
+        "description": "청소년을 위한 그릿의 가치와 적용법을 설명한 책.",
+      },
+      {
+        "title": "good_test3",
+        "author": "good_test3",
+        "publisher": "good_test3",
+        "isbn": "130620456",
+        "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/6/65/No-Image-Placeholder.svg", // ✅ 변경된 이미지 URL
+        "description": "청소년을 위한 그릿의 가치와 적용법을 설명한 책.",
+      },
+    ];
+
+    if (query.trim().isEmpty) {
+      setState(() {
+        _searchResults = [];
+      });
+      return;
+    }
+
+    final results = dummyBooks.where((book) =>
+    (book['title']!.toLowerCase().contains(query.toLowerCase()) ||
+        book['author']!.toLowerCase().contains(query.toLowerCase()))).toList();
+
+    setState(() {
+      _searchResults = results;
+    });
+  }
+
+  void _addSpecificBook(Map<String, dynamic> book) {
+    final id = generateBookId(book['isbn'] ?? '', book['title'] ?? '', book['author'] ?? '');
+
+    final alreadyExists = _specificBooks.any((b) => b['id'] == id);
+
+    if (!alreadyExists) {
+      setState(() {
+        _specificBooks.add({
+          "id": id,
+          "title": book['title'] ?? '',
+          "author": book['author'] ?? '',
+        });
+        _totalBooksController.text = _specificBooks.length.toString();
+      });
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("이미 추가된 책입니다.", style: TextStyle(color: Colors.black)),
+          backgroundColor: Colors.amberAccent,
+          duration: Duration(milliseconds: 1500),
+        ),
+      );
+    }
+  }
+
+  void _removeSpecificBook(Map<String, String> book) {
+    setState(() {
+      _specificBooks.remove(book);
+      _totalBooksController.text = _specificBooks.length.toString();
+    });
+  }
+
+  Widget _buildImagePickerSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text("6. 챌린지 대표 이미지",
+            style: TextStyle(
+                color: Colors.white, fontFamily: 'kopub', fontSize: 16)),
+        const SizedBox(height: 8),
+        GestureDetector(
+          onTap: _pickImage,
+          child: Container(
+            width: double.infinity,
+            height: 180,
+            decoration: BoxDecoration(
+              color: Colors.white10,
+              borderRadius: BorderRadius.circular(12),
+              image: _selectedImage != null
+                  ? DecorationImage(
+                      image: FileImage(_selectedImage!), fit: BoxFit.cover)
+                  : null,
+            ),
+            child: _selectedImage == null
+                ? const Center(
+                    child: Text("이미지를 선택하려면 탭하세요",
+                        style: TextStyle(
+                          color: Colors.white54,
+                          fontFamily: 'kopub',
+                        )),
+                  )
+                : null,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSubmitButton() {
+    return ElevatedButton(
+      onPressed: () {
+        final title = _titleController.text.trim();
+        final description = _descriptionController.text.trim();
+        final imageUrl =
+            _selectedImage?.path ?? "assets/image/challenge_20.png";
+
+        if (title.isEmpty || _startDate == null || _endDate == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text(
+              "필수 항목을 모두 입력해주세요.",style: TextStyle(color: Colors.black),),
+              backgroundColor: Colors.amberAccent,)
+            ,
+          );
+          return;
+        }
+
+        int totalBooks = _selectedType == ChallengeType.specificBooks
+            ? _specificBooks.length
+            : int.tryParse(_totalBooksController.text.trim()) ?? 0;
+
+        if (totalBooks <= 0) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("지정 도서를 저장해주세요.", style: TextStyle(color: Colors.black),),
+            backgroundColor: Colors.amberAccent,),
+          );
+          return;
+        }
+
+        final newChallenge = Challenge(
+          title: title,
+          description: description,
+          imageUrl: imageUrl,
+          isCustom: true,
+          totalBooks: totalBooks,
+          startDate: _startDate!,
+          endDate: _endDate!,
+          type: _selectedType,
+          requiredBooks: _selectedType == ChallengeType.specificBooks
+              ? _specificBooks
+              : null,
+        );
+
+        final challengeProvider =
+            Provider.of<ChallengeProvider>(context, listen: false);
+        final savedBooks =
+            Provider.of<SavedBooksProvider>(context, listen: false).savedBooks;
+
+        challengeProvider.addCustomChallenge(newChallenge);
+        challengeProvider.joinChallenge(newChallenge, savedBooks);
+
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            backgroundColor: Colors.greenAccent,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            content: Row(
+              children: [
+                const Icon(Icons.emoji_events,
+                    color: Colors.deepPurple, size: 36),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    "'${newChallenge.title}'\n챌린지가 생성되었습니다!\n응원합니다 💪",
+                    style: const TextStyle(
+                        color: Colors.black,
+                        fontWeight: FontWeight.bold,
+                        fontFamily: 'kopub',
+                        fontSize: 16),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+
+        Future.delayed(const Duration(seconds: 2), () {
+          Navigator.of(context).pop();
+          Navigator.of(context).pop();
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+                builder: (_) =>
+                    ChallengeOngoingScreen(challenge: newChallenge)),
+          );
+        });
+      },
+      style: ElevatedButton.styleFrom(
+        backgroundColor: Colors.amberAccent,
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+      child: const Center(
+        child: Text(
+          "챌린지 생성하기",
+          style: TextStyle(
+              color: Colors.black,
+              fontFamily: 'kopub',
+              fontSize: 16,
+              fontWeight: FontWeight.bold),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickImage() async {
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+
+    if (pickedFile != null) {
+      setState(() {
+        _selectedImage = File(pickedFile.path);
+      });
+    }
+  }
+}
+
+class SearchBoxWithResults extends StatelessWidget {
+  final TextEditingController searchController;
+  final List<Map<String, String>> searchResults;
+  final List<Map<String, String>> selectedBooks;
+  final ValueChanged<String> onSearchChanged;
+  final Function(Map<String, String>) onBookSelected;
+  final Function(Map<String, String>) onBookRemoved;
+
+  const SearchBoxWithResults({
+    super.key,
+    required this.searchController,
+    required this.searchResults,
+    required this.selectedBooks,
+    required this.onSearchChanged,
+    required this.onBookSelected,
+    required this.onBookRemoved,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // 1. 검색창
+        TextField(
+          controller: searchController,
+          onChanged: onSearchChanged,
+          style: const TextStyle(color: Colors.white),
+          decoration: InputDecoration(
+            contentPadding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
+            prefixIcon: const Icon(Icons.search, color: Colors.white),
+            hintText: "책 제목 / 작가를 입력하세요",
+            hintStyle: const TextStyle(color: Colors.white54),
+            filled: true,
+            fillColor: Colors.white12,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide.none,
+            ),
+          ),
+        ),
+
+        // 2. 검색 결과 다이얼로그 (검색어 있을 때 부드럽게 열리는 구조)
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+          margin: searchResults.isNotEmpty ? const EdgeInsets.only(top: 10) : EdgeInsets.zero,
+          height: searchResults.isNotEmpty ? 200 : 0,
+          child: searchResults.isNotEmpty
+              ? Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.white12,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: ListView.builder(
+              itemCount: searchResults.length,
+              itemBuilder: (context, index) {
+                final book = searchResults[index];
+                return ListTile(
+                  leading: const Icon(Icons.book, color: Colors.white),
+                  title: Text(book['title'] ?? '', style: const TextStyle(color: Colors.white, fontFamily: 'kopub')),
+                  subtitle: Text(book['author'] ?? '', style: const TextStyle(color: Colors.white60, fontFamily: 'kopub')),
+                  onTap: () => onBookSelected(book),
+                );
+              },
+            ),
+          )
+              : const SizedBox.shrink(),
+        ),
+
+        const SizedBox(height: 20), // 항상 일정한 여백!
+
+        // 3. 선택된 책 리스트
+        if (selectedBooks.isNotEmpty)
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: selectedBooks.map((book) {
+              return Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.white10,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.bookmark, color: Colors.white54),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        "${book['title']} (${book['author']})",
+                        style: const TextStyle(color: Colors.white, fontFamily: 'kopub'),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: Colors.redAccent),
+                      onPressed: () => onBookRemoved(book),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
+      ],
+    );
+  }
+}

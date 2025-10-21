@@ -1,0 +1,251 @@
+import 'package:flutter/material.dart';
+import 'package:dayverse_book/model/base_challenge.dart';
+import 'package:dayverse_book/model/normal_challenge.dart';
+import 'package:dayverse_book/model/challenge_attempt_model.dart';
+import 'package:dayverse_book/model/book_model.dart';
+import 'package:dayverse_book/service/challenge_record_service.dart';
+import 'package:dayverse_book/utils/challenge_check_utils.dart';
+import 'package:dayverse_book/utils/challenge_progress_utils.dart';
+import 'package:flutter/services.dart';
+import 'dart:convert';
+import 'package:collection/collection.dart';
+
+class NormalChallengeProvider extends ChangeNotifier {
+  final List<NormalChallenge> _challenges = [];
+
+  List<NormalChallenge> get allChallenges => _challenges;
+
+  List<NormalChallenge> get joinedChallenges =>
+      _challenges.where((c) => c.isJoined && !c.isCompleted).toList();
+
+  List<NormalChallenge> get notJoinedChallenges =>
+      _challenges.where((c) => !c.isJoined && !c.isCompleted).toList();
+
+  List<NormalChallenge> get completedChallenges =>
+      _challenges.where((c) => c.isCompleted).toList();
+
+  /// ✅ 챌린지 JSON 불러오기
+  Future<void> loadChallengesFromAssets() async {
+    try {
+      final String jsonString = await rootBundle.loadString('assets/challenges.json');
+      final List<dynamic> jsonList = json.decode(jsonString);
+
+      _challenges.clear();
+
+      for (final raw in jsonList) {
+        // ✅ stageDurations가 없으면 NormalChallenge로 간주
+        if (raw['stageDurations'] == null) {
+          final challenge = NormalChallenge.fromMap(raw);
+          _challenges.add(challenge);
+          await refreshChallengeStatus(challenge.id);
+        }
+      }
+
+      notifyListeners();
+    } catch (e) {
+      debugPrint('❌ NormalChallenge JSON 로드 실패: $e');
+    }
+  }
+
+  /// ✅ 챌린지 참여
+  Future<void> joinChallenge(
+      NormalChallenge challenge, {
+        DateTime? startDate,
+        int? duration,
+        List<BookModel>? participatingBooks,
+      }) async {
+    final index = _challenges.indexWhere((c) => c.id == challenge.id);
+    if (index == -1) return;
+
+    final effectiveStartDate = startDate ?? DateTime.now();
+
+    final targetCount = duration ??
+        (challenge.durationOptions != null && challenge.durationOptions!.isNotEmpty
+            ? challenge.durationOptions!.first
+            : (challenge.checkCountOptions != null && challenge.checkCountOptions!.isNotEmpty
+            ? challenge.checkCountOptions!.first
+            : 1));  // fallback 안전값
+
+    final calculatedEndDate = challenge.period == ChallengePeriod.daysBased
+        ? effectiveStartDate.add(Duration(days: targetCount - 1))
+        : challenge.endDate;
+
+    final newAttempt = ChallengeAttempt(
+      startDate: effectiveStartDate,
+      endDate: calculatedEndDate ?? effectiveStartDate,
+      completed: false,
+      isSuccessful: false,
+      completedBookIds: [],
+      selectedDuration: targetCount,
+    );
+
+    final updated = challenge.copyWith(
+      isJoined: true,
+      isCompleted: false,
+      startDate: effectiveStartDate,
+      endDate: calculatedEndDate,
+      attempts: [newAttempt],
+      participatingBooks: participatingBooks ?? [],
+    );
+
+    _challenges[index] = updated;
+
+    await ChallengeRecordService.saveInitialRecord(
+      updated,
+      targetCheckCount: targetCount,
+      selectedDuration: targetCount,
+      additionalFields: {
+        'isJoined': true,
+        'isCompleted': false,
+      },
+    );
+
+    notifyListeners();
+  }
+
+  /// ✅ 챌린지 완료 처리
+  Future<void> markChallengeAsCompleted(NormalChallenge challenge) async {
+    final index = _challenges.indexWhere((c) => c.id == challenge.id);
+    if (index == -1) return;
+
+    final now = DateTime.now();
+    final attempt = ChallengeAttempt(
+      startDate: challenge.startDate ?? now,
+      endDate: challenge.endDate ?? now,
+      completed: true,
+      isSuccessful: true,
+      completedBookIds:
+      (challenge.participatingBooks ?? []).map((b) => b.id).whereType<String>().toList(),
+    );
+
+    final updated = challenge.copyWith(
+      isCompleted: true,
+      isJoined: false,
+      attempts: [...challenge.attempts, attempt],
+    );
+
+    _challenges[index] = updated;
+
+    await ChallengeRecordService.updateChallengeRecord(
+      updated.id,
+      {
+        'isCompleted': true,
+        'isJoined': false,
+        'attempts': updated.attempts.map((a) => a.toMap()).toList(),
+      },
+    );
+
+    notifyListeners();
+  }
+
+  /// ✅ 챌린지 상태 새로고침
+  Future<void> refreshChallengeStatus(String challengeId, {List<BookModel>? savedBooks}) async {
+    final index = _challenges.indexWhere((c) => c.id == challengeId);
+    if (index == -1) return;
+
+    final challenge = _challenges[index];
+    final record = await ChallengeRecordService.fetchChallengeRecord(challenge.id);
+
+    NormalChallenge updated = challenge;
+
+    if (record['isJoined'] != null) {
+      updated = updated.copyWith(isJoined: record['isJoined'] == true);
+    }
+    if (record['isCompleted'] != null) {
+      updated = updated.copyWith(isCompleted: record['isCompleted'] == true);
+    }
+    if (record['startDate'] != null) {
+      updated = updated.copyWith(startDate: DateTime.tryParse(record['startDate'])?.toLocal());
+    }
+    if (record['endDate'] != null) {
+      updated = updated.copyWith(endDate: DateTime.tryParse(record['endDate'])?.toLocal());
+    }
+    if (record['attempts'] != null) {
+      final attempts = (record['attempts'] as List)
+          .map((e) => ChallengeAttempt.fromMap(Map<String, dynamic>.from(e)))
+          .toList();
+      updated = updated.copyWith(attempts: attempts);
+    }
+
+    if (record['participatingBooks'] != null) {
+      final books = (record['participatingBooks'] as List)
+          .map((e) => BookModel.fromMap(Map<String, dynamic>.from(e)))
+          .toList();
+      updated = updated.copyWith(participatingBooks: books);
+    }
+
+    final checkAction = getChallengeCheckActionType(updated);
+    final progressSource = checkAction == ChallengeCheckActionType.libraryAuto
+        ? savedBooks ?? <BookModel>[]
+        : record;
+
+    final isCompleted = ChallengeProgressUtils.isChallengeCompleted(updated, progressSource);
+
+    if (isCompleted && !updated.isCompleted) {
+      updated = updated.copyWith(isCompleted: true, isJoined: false);
+      await ChallengeRecordService.updateChallengeRecord(updated.id, {
+        'isCompleted': true,
+        'isJoined': false,
+      });
+    }
+
+    _challenges[index] = updated;
+    notifyListeners();
+  }
+
+  /// ✅ 챌린지 취소
+  Future<void> unjoinChallenge(NormalChallenge challenge) async {
+    final index = _challenges.indexWhere((c) => c.id == challenge.id);
+    if (index == -1) return;
+
+    final updated = challenge.copyWith(
+      isJoined: false,
+      isCompleted: false,
+      startDate: null,
+      endDate: null,
+      attempts: [],
+    );
+
+    _challenges[index] = updated;
+
+    await ChallengeRecordService.updateChallengeRecord(
+      challenge.id,
+      {
+        'isJoined': false,
+        'isCompleted': false,
+        'startDate': null,
+        'endDate': null,
+        'attempts': [],
+      },
+    );
+
+    notifyListeners();
+  }
+
+  /// ✅ 챌린지 찾기
+  NormalChallenge? findChallengeById(String id) {
+    return _challenges.firstWhereOrNull((c) => c.id == id);
+  }
+
+  Future<void> refreshAllChallenges({required List<BookModel> savedBooks}) async {
+    for (final c in _challenges) {
+      await refreshChallengeStatus(c.id, savedBooks: savedBooks);
+    }
+  }
+
+  void clearChallengeStates() {
+    for (int i = 0; i < _challenges.length; i++) {
+      final c = _challenges[i].copyWith(
+        isJoined: false,
+        isCompleted: false,
+        startDate: null,
+        endDate: null,
+        attempts: [],
+        participatingBooks: [],
+      );
+      _challenges[i] = c;
+    }
+
+    notifyListeners();
+  }
+}

@@ -1,0 +1,381 @@
+import 'package:dayverse_book/model/challenge_model.dart';
+import 'package:dayverse_book/model/book_model.dart';
+import 'package:dayverse_book/utils/challenge_stage_utils.dart';
+import 'package:flutter/foundation.dart';
+import 'package:dayverse_book/utils/challenge_check_utils.dart';
+
+class ChallengeProgressUtils {
+  static String _twoDigits(int n) => n.toString().padLeft(2, '0');
+
+  /// ✅ 챌린지 완료 여부
+  static bool isChallengeCompleted(
+      Challenge challenge,
+      dynamic recordDataOrSavedBooks,
+      ) {
+    final now = DateTime.now();
+    final checkAction = getChallengeCheckActionType(challenge);
+
+    debugPrint("[CHECK] isChallengeCompleted() 호출됨: ${challenge.id}");
+    debugPrint("[CHECK] 유형: ${challenge.type}, 방식: ${challenge.method}, checkAction: $checkAction");
+
+    // ✅ 운영자 종료일이 정해진 경우
+    final isEndDatePassed = challenge.endDate != null && now.isAfter(challenge.endDate!.toLocal());
+
+    // ✅ 스테이지 챌린지 처리
+    if (challenge.stageType == ChallengeStageType.staged) {
+      final isFinal = isFinalStage(challenge, recordDataOrSavedBooks);
+      final isCurrentStageDone = isCurrentStageCompleted(challenge, recordDataOrSavedBooks);
+
+      debugPrint("[⚠️ COMPLETED? - Staged] isFinalStage: $isFinal / isCurrentStageDone: $isCurrentStageDone");
+      return isFinal && isCurrentStageDone;
+    }
+
+    // ✅ 일반 챌린지 (루틴형 / 성장형)
+    final completed = getCompletedCount(challenge, recordDataOrSavedBooks);
+    final target = getTargetCount(challenge, recordDataOrSavedBooks);
+    final progress = (target > 0) ? (completed / target) : 0.0;
+
+    final isTargetMet = (completed >= target && target > 0) || progress >= 1.0;
+
+    debugPrint("[⚠️ COMPLETED? - 일반] completed: $completed / target: $target / progress: ${progress.toStringAsFixed(2)} / endDatePassed: $isEndDatePassed");
+    debugPrint("[⚠️ RESULT] isTargetMet: $isTargetMet / isJoined: ${challenge.isJoined}");
+
+    return isTargetMet || (challenge.isJoined && isEndDatePassed);
+  }
+
+  /// ✅ 챌린지 진행률 (0.0 ~ 1.0)
+  static double getProgress(Challenge challenge, dynamic recordDataOrSavedBooks, [int? stageIndex,]) {
+    try {
+      final actionType = getChallengeCheckActionType(challenge);
+      debugPrint("[DEBUG] getProgress: actionType=$actionType");
+
+      // ✅ 완료 수 계산
+      final completed = getCompletedCount(challenge, recordDataOrSavedBooks, stageIndex);
+
+      // ✅ 목표 수 계산
+      final target = getTargetCount(challenge, recordDataOrSavedBooks, stageIndex);
+
+      debugPrint("[PROGRESS] completed: $completed / target: $target");
+
+      if (target <= 0) return 0;
+      return (completed / target).clamp(0.0, 1.0);
+    } catch (e) {
+      debugPrint("[ERROR] getProgress 실패: $e");
+      return 0;
+    }
+  }
+
+  /// ✅ 완료 수
+  static int getCompletedCount(Challenge challenge, dynamic data, [int? stageIndex]) {
+    final action = getChallengeCheckActionType(challenge);
+    debugPrint("[CHECK] getCompletedCount called - challengeId: ${challenge.id}, type: $action, dataType: ${data.runtimeType}");
+
+    switch (action) {
+      case ChallengeCheckActionType.libraryAuto:
+        if (data is List<BookModel>) {
+          return _getQuantityBasedCompletedCount(challenge, data);
+        } else {
+          debugPrint("[❌ 오류] libraryAuto 타입인데 data가 List<BookModel>이 아님: ${data.runtimeType}");
+          return 0;
+        }
+
+      case ChallengeCheckActionType.pageAuto:
+      case ChallengeCheckActionType.timerAuto:
+      case ChallengeCheckActionType.manual:
+      case ChallengeCheckActionType.none:
+      // 공통적으로 Map<String, dynamic> 타입 필요
+        if (data is! Map) {
+          debugPrint("[❌ 오류] getCompletedCount - data is not Map: ${data.runtimeType}");
+          return 0;
+        }
+
+        late final Map<String, dynamic> map;
+        try {
+          map = Map<String, dynamic>.from(data);
+        } catch (e) {
+          debugPrint("[❌ 오류] getCompletedCount - Map 변환 실패: $e");
+          return 0;
+        }
+
+        // ✅ 스테이지 기반 검증
+        if (challenge.stageType == ChallengeStageType.staged) {
+          final currentStageIndex = stageIndex ?? getCurrentStageIndex(challenge, map);
+          final recordStageIndex = getCurrentStageIndex(challenge, map);
+
+          if (recordStageIndex != currentStageIndex) {
+            debugPrint("[⏭ SKIP] stage mismatch: record=$recordStageIndex vs current=$currentStageIndex");
+            return 0;
+          }
+        }
+
+        switch (action) {
+          case ChallengeCheckActionType.pageAuto:
+            return _getSpecificBooksPageProgress(challenge, map);
+
+          case ChallengeCheckActionType.timerAuto:
+            final raw = map['dailyMinutes'];
+            if (raw is! Map) {
+              debugPrint("[ℹ️ timerAuto] dailyMinutes 없음 또는 Map 아님 → 아직 기록되지 않음");
+              return 0;
+            }
+            final minutesMap = raw.map((k, v) => MapEntry(k.toString(), int.tryParse(v.toString()) ?? 0));
+            final required = challenge.requiredMinutes ?? 0;
+            final count = minutesMap.values.where((m) => m >= required).length;
+            debugPrint("[✅ timerAuto 완료 수]: $count");
+            return count;
+
+          case ChallengeCheckActionType.manual:
+            final isRoutineAuto = challenge.type == ChallengeType.routine &&
+                challenge.checkMode == ChallengeCheckMode.auto;
+
+            final routine = Map<String, bool>.from(map['routineChecks'] ?? {});
+            final count = Map<String, bool>.from(map['countChecks'] ?? {});
+
+            final result = isRoutineAuto
+                ? routine.values.where((v) => v).length
+                : (challenge.checkMode == ChallengeCheckMode.manual
+                ? count.values.where((v) => v).length
+                : routine.values.where((v) => v).length);
+
+            debugPrint("[✅ manual 완료 수]: $result");
+            return result;
+
+          case ChallengeCheckActionType.none:
+            return 0;
+
+          default:
+            debugPrint("[❌ 알 수 없는 타입 처리 중]");
+            return 0;
+        }
+
+      default:
+        debugPrint("[❌ ERROR] 알 수 없는 ChallengeCheckActionType: $action");
+        return 0;
+    }
+  }
+
+  /// ✅ pageAuto용: 특정 도서 페이지 진행
+  static int _getSpecificBooksPageProgress(Challenge challenge, Map<String, dynamic> data) {
+    final requiredBooks = challenge.requiredBooks ?? [];
+    final readPagesMap = (data['bookReadPages'] as Map?)?.cast<String, dynamic>() ?? {};
+    int count = 0;
+
+    for (final book in requiredBooks) {
+      final id = book['id']?.toString();
+      final total = int.tryParse(book['pageCount']?.toString() ?? '');
+      final read = int.tryParse(readPagesMap[id]?.toString() ?? '');
+
+      if (id != null && total != null && read != null && (read / total) >= 0.97) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  /// ✅ quantityBased: 읽은 책 개수 계산
+  static int _getQuantityBasedCompletedCount(Challenge challenge, List<BookModel> savedBooks) {
+    final start = challenge.startDate?.toLocal();
+    final end = challenge.endDate?.toLocal();
+    int completed = 0;
+
+    for (final book in savedBooks) {
+      try {
+        final readDate = book.readDate?.toLocal();
+        final isInRange = readDate != null && start != null && end != null &&
+            !readDate.isBefore(start) && !readDate.isAfter(end);
+        final isDone = book.category == 'done' && isInRange;
+
+        debugPrint("[📚 체크] ${book.title} - 카테고리:${book.category}, readDate:$readDate, 포함:$isDone");
+
+        if (isDone) completed++;
+      } catch (e) {
+        debugPrint("[❌ ERROR] 책 처리 중 오류: $e\n데이터: $book");
+      }
+    }
+
+    debugPrint("[✅ 완료된 책 개수] $completed / 총 ${savedBooks.length}권");
+    return completed;
+  }
+
+  /// ✅ countBased: 체크 수 계산
+  static int _getCountBasedCompletedCount(Challenge challenge, Map<String, dynamic> recordData) {
+    final routineChecks = (recordData['routineChecks'] as Map?)?.cast<String, bool>() ?? {};
+    final countChecks = (recordData['countChecks'] as Map?)?.cast<String, bool>() ?? {};
+
+    return challenge.checkMode == ChallengeCheckMode.manual
+        ? countChecks.values.where((v) => v == true).length
+        : routineChecks.values.where((v) => v == true).length;
+  }
+
+  /// ✅ 목표 수
+  static int getTargetCount(Challenge challenge, dynamic recordDataOrSavedBooks, [int? stageIndex]) {
+    if (challenge.method == ChallengeMethod.countBased) {
+      int index = stageIndex ?? 0;
+
+      if (index == 0 && recordDataOrSavedBooks is Map<String, dynamic>) {
+        final stageRaw = recordDataOrSavedBooks['stageIndex'];
+        index = stageRaw is int
+            ? stageRaw
+            : int.tryParse(stageRaw?.toString() ?? '0') ?? 0;
+      }
+
+      if (index == 0 && challenge.attempts.isNotEmpty) {
+        final latest = challenge.attempts.last;
+        if (latest.stageIndex != null) {
+          index = latest.stageIndex!;
+        }
+      }
+
+      if (challenge.stageType == ChallengeStageType.staged && challenge.stageDurations.isNotEmpty) {
+        if (index >= 0 && index < challenge.stageDurations.length) {
+          final result = challenge.stageDurations[index];
+          debugPrint("[🎯 Target] stageIndex: $index → target: $result");
+          return result;
+        }
+      }
+
+      if (recordDataOrSavedBooks is Map<String, dynamic>) {
+        final raw = recordDataOrSavedBooks['selectedDuration'] ??
+            recordDataOrSavedBooks['targetCheckCount'];
+        final parsed = raw is int ? raw : int.tryParse(raw?.toString() ?? '');
+        if (parsed != null) {
+          debugPrint("[🎯 Target] from recordData: $parsed");
+          return parsed;
+        }
+      }
+
+      final fallback = challenge.checkCountOptions?.first ??
+          challenge.durationOptions?.first ?? 1;
+      debugPrint("[🎯 Target] fallback: $fallback");
+      return fallback;
+    }
+
+    switch (challenge.method) {
+      case ChallengeMethod.specificBooks:
+        final result = challenge.specificBookMode == SpecificBookMode.systemDefined
+            ? challenge.requiredBooks?.length ?? 0
+            : challenge.participatingBooks?.length ?? 0;
+        debugPrint("[🎯 Target] specificBooks: $result");
+        return result;
+
+      case ChallengeMethod.quantityBased:
+        final result = challenge.totalBooks ?? 0;
+        debugPrint("[🎯 Target] quantityBased: $result");
+        return result;
+
+      case ChallengeMethod.countBased:
+        return 1;
+    }
+  }
+
+  /// ✅ 남은 일수 계산
+  static int calculateRemainingDays(Challenge challenge, DateTime today, Map<String, dynamic> data, [int? stageIndex,]) {
+    if (challenge.period == ChallengePeriod.daysBased) {
+      // ✅ 1. 시작일: 스테이지 기반이면 stage_X의 routineStartDate 우선
+      DateTime? start;
+
+      if (challenge.stageType == ChallengeStageType.staged && stageIndex != null) {
+        final stageKey = 'stage_$stageIndex';
+        final stageData = data[stageKey] as Map<String, dynamic>? ?? {};
+        final raw = stageData['routineStartDate'];
+        start = (raw != null) ? DateTime.tryParse(raw.toString())?.toLocal() : null;
+      }
+
+      // ✅ 2. fallback: 참여 당시 기록된 startDate or challenge.startDate
+      start ??= (data['startDate'] != null)
+          ? DateTime.tryParse(data['startDate'].toString())?.toLocal()
+          : challenge.startDate?.toLocal();
+
+      // ✅ 3. 기간 결정
+      int? duration;
+
+      if (challenge.stageType == ChallengeStageType.staged && stageIndex != null) {
+        if (stageIndex >= 0 && stageIndex < challenge.stageDurations.length) {
+          duration = challenge.stageDurations[stageIndex];
+        }
+      }
+
+      // ✅ fallback: 참여 시 선택한 duration
+      duration ??= int.tryParse(data['selectedDuration']?.toString() ?? '');
+      // ✅ fallback: 운영자가 지정한 durationOptions[0]
+      duration ??= challenge.durationOptions?.isNotEmpty == true ? challenge.durationOptions!.first : null;
+
+      if (start != null && duration != null) {
+        final end = start.add(Duration(days: duration - 1));
+        return end.difference(today).inDays.clamp(0, 999);
+      }
+    }
+
+    if (challenge.period == ChallengePeriod.periodBased && challenge.endDate != null) {
+      return challenge.endDate!.toLocal().difference(today).inDays + 1;
+    }
+
+    return 0;
+  }
+
+  static Set<String> _getRequiredBookIds(Challenge challenge) {
+    final ids = <String>{};
+    for (final b in challenge.requiredBooks ?? []) {
+      final id = b['id']?.toString();
+      if (id != null && id.isNotEmpty) ids.add(id);
+    }
+    return ids;
+  }
+
+  static String _dateKey(DateTime? date) {
+    if (date == null) return '';
+    return "${date.year}-${_twoDigits(date.month)}-${_twoDigits(date.day)}";
+  }
+
+  /// ✅ 현재 스테이지 인덱스 반환 (기본값 0)
+  static int getCurrentStageIndex(Challenge challenge, dynamic recordData) {
+    try {
+      if (recordData is Map<String, dynamic>) {
+        final raw = recordData['stageIndex'];
+        if (raw != null) {
+          final parsed = int.tryParse(raw.toString());
+          if (parsed != null && parsed >= 0) return parsed;
+        }
+      }
+
+      // fallback to latest attempt
+      if (challenge.attempts.isNotEmpty) {
+        final latest = challenge.attempts.last;
+        if (latest.stageIndex != null && latest.stageIndex! >= 0) {
+          return latest.stageIndex!;
+        }
+      }
+    } catch (_) {}
+
+    // ✅ 모든 fallback이 실패해도 0 보장
+    return 0;
+  }
+
+  /// ✅ 현재 스테이지의 목표 체크 수
+  static int getCurrentStageTargetCount(Challenge challenge, Map<String, dynamic> data) {
+    return challenge.stageType == ChallengeStageType.staged && challenge.stageDurations.isNotEmpty
+        ? challenge.stageDurations[getCurrentStageIndex(challenge, data)]
+        : getTargetCount(challenge, data);
+  }
+
+  /// ✅ 현재 스테이지의 진행률
+  static double getStageProgress(Challenge challenge, Map<String, dynamic> data) {
+    final completed = getCompletedCount(challenge, data);
+    final target = getCurrentStageTargetCount(challenge, data);
+    return target == 0 ? 0.0 : (completed / target).clamp(0.0, 1.0);
+  }
+
+  /// ✅ 현재 스테이지 완료 여부
+  static bool isCurrentStageCompleted(Challenge challenge, Map<String, dynamic> data) {
+    final completed = getCompletedCount(challenge, data);
+    final target = getCurrentStageTargetCount(challenge, data);
+    return completed >= target && target > 0;
+  }
+
+  /// ✅ 마지막 스테이지인지 여부
+  static bool isFinalStage(Challenge challenge, Map<String, dynamic> recordData) {
+    final currentIndex = getCurrentStageIndex(challenge, recordData);
+    return currentIndex >= challenge.stageDurations.length - 1;
+  }
+
+}

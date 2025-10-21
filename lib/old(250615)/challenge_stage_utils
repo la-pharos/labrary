@@ -1,0 +1,34 @@
+import 'package:dayverse_book/model/challenge_model.dart';
+
+extension StageChallengeExtension on Challenge {
+  /// ✅ 현재 챌린지가 단계형 챌린지인지 여부
+  bool get isStaged => stageType == ChallengeStageType.staged;
+
+  /// ✅ 현재 스테이지 인덱스 (0부터 시작)
+  int get currentStageIndex {
+    if (!isStaged || stageDurations.isEmpty) return 0;
+    return attempts.isNotEmpty ? (attempts.last.stageIndex ?? 0) : 0;
+  }
+
+  /// ✅ 현재 스테이지의 목표 일수
+  int? get currentStageDuration {
+    if (!isStaged || currentStageIndex >= stageDurations.length) return null;
+    return stageDurations[currentStageIndex];
+  }
+
+  /// ✅ 현재 스테이지 텍스트 (예: "2단계 / 총 3단계")
+  String get currentStageText {
+    if (!isStaged || stageDurations.isEmpty) return "";
+    return "${currentStageIndex + 1}단계 / 총 ${stageDurations.length}단계";
+  }
+
+  /// ✅ 마지막 스테이지 여부
+  bool get isLastStage {
+    return isStaged && currentStageIndex == stageDurations.length - 1;
+  }
+
+  /// ✅ 다음 스테이지 존재 여부
+  bool get hasNextStage {
+    return isStaged && currentStageIndex < stageDurations.length - 1;
+  }
+}

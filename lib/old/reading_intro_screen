@@ -1,0 +1,364 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:dayverse_book/provider/saved_books_provider.dart';
+import 'package:dayverse_book/widget/reading_book_search_dialog.dart';
+import 'package:dayverse_book/main.dart';
+import 'package:dayverse_book/screen/reading_running_screen.dart';
+import 'package:dayverse_book/utils/book_utils.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
+
+class ReadingIntroScreen extends StatefulWidget {
+  const ReadingIntroScreen({super.key});
+
+  @override
+  State<ReadingIntroScreen> createState() => _ReadingIntroScreenState();
+}
+
+class _ReadingIntroScreenState extends State<ReadingIntroScreen> {
+  Map<String, dynamic>? selectedBook;
+
+
+  void _openBookSearchDialog() async {
+    final book = await showDialog<Map<String, dynamic>>(  // 🔁 String → dynamic
+      context: context,
+      builder: (_) => ReadingBookSearchDialog(
+        onBookSelected: (book) => Navigator.of(context).pop(book),
+      ),
+    );
+
+    if (book != null) {
+      book['totalPages'] = book['pageCount'] ?? 0; // ✅ 필드 변환
+
+      final bookId = generateBookId(book['isbn'] ?? '', book['title'] ?? '', book['author'] ?? '');
+      final newBook = {
+        'id': bookId,
+        'title': book['title'] ?? '',
+        'author': book['author'] ?? '',
+        'isbn': book['isbn'] ?? '',
+        'imageUrl': book['imageUrl'] ?? '',
+        'category': 'reading',
+        'startDate': DateTime.now().toIso8601String(),
+        'endDate': null,
+        'customLibraries': [],
+      };
+
+      final savedBooksProvider = Provider.of<SavedBooksProvider>(context, listen: false);
+      final isAlreadySaved = savedBooksProvider.savedBooks.any((b) => b['id'] == bookId);
+
+      // ❗ 저장되지 않은 책만 추가
+      if (!isAlreadySaved) {
+        savedBooksProvider.addBook(newBook);
+      }
+
+      // ✅ 선택된 책으로 설정
+      setState(() {
+        selectedBook = newBook;
+      });
+    }
+  }
+
+  late Future<DocumentSnapshot> _userFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _userFuture = _fetchUserData();
+  }
+
+  Future<DocumentSnapshot> _fetchUserData() {
+    return FirebaseFirestore.instance
+        .collection('users')
+        .doc(FirebaseAuth.instance.currentUser?.uid)
+        .get();
+  }
+
+  void _startReading() async {
+    if (selectedBook == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("읽을 책을 먼저 선택해주세요.")),
+      );
+      return;
+    }
+
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ReadingRunningScreen(book: selectedBook!),
+      ),
+    );
+
+    if (result == true) {
+      setState(() {
+        _userFuture = _fetchUserData(); // ✅ 돌아온 뒤 다시 fetch
+      });
+    }
+  }
+
+
+  @override
+  Widget build(BuildContext context) {
+
+    final screenHeight = MediaQuery.of(context).size.height;
+    final screenWidth = MediaQuery.of(context).size.width;
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF0A1D27),
+      bottomNavigationBar: Container(
+        padding: const EdgeInsets.symmetric(vertical: 15),
+        decoration: const BoxDecoration(
+          color: Color(0xFF01241c),
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(20),
+            topRight: Radius.circular(20),
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            _buildNavItem(context, Icons.home_filled, 0),
+            _buildNavItem(context, Icons.shelves, 1),
+            _buildNavItem(context, Icons.local_fire_department, 2),
+            _buildNavItem(context, Icons.bar_chart, 3),
+            _buildNavItem(context, Icons.menu, 4),
+          ],
+        ),
+      ),
+      body: Stack(
+        children: [
+          SizedBox(
+            height: screenHeight,
+            width: screenWidth,
+            child: Image.asset(
+              'assets/image/diving.jpg',
+              fit: BoxFit.cover,
+            ),
+          ),
+
+          SafeArea(
+            child: Stack(
+              children: [
+                // ✅ 오프닝 멘트
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  child: Center(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        const SizedBox(height: 60),
+                        const Text(
+                          "독서로 빠져볼까요?",
+                          style: TextStyle(fontSize: 24, color: Colors.white, fontFamily: 'Kopub',fontWeight: FontWeight.bold),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 12),
+                        const Text(
+                          "깊은 몰입을 위해 핸드폰은 멀리 두세요!",
+                          style: TextStyle(fontSize: 16, color: Colors.white70, fontFamily: 'Kopub',),
+                          textAlign: TextAlign.center,
+                        ),
+                        // ✅ 오늘 총 독서시간 표시
+                        const SizedBox(height: 16),
+                        Consumer<SavedBooksProvider>(
+                          builder: (context, savedBooksProvider, child) {
+                            final today = DateTime.now();
+                            final todayKey = "${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}";
+                            final totalMinutesMap = savedBooksProvider.getTotalReadingMinutesByDate();
+                            final minutes = totalMinutesMap[todayKey] ?? 0;
+
+                            return Text(
+                              "오늘 총 독서 ${minutes}분",
+                              style: const TextStyle(
+                                fontSize: 16,
+                                color: Colors.amberAccent,
+                                fontFamily: 'Kopub',
+                                fontWeight: FontWeight.w600,
+                              ),
+                              textAlign: TextAlign.center,
+                            );
+                          },
+                        ),
+                        const Spacer(), // 아래 빈 공간 확보
+                      ],
+                    ),
+                  ),
+                ),
+
+                // ✅ 읽을 책 선택 버튼
+                Positioned(
+                  top: selectedBook != null
+                      ? MediaQuery.of(context).size.height * 0.18
+                      : MediaQuery.of(context).size.height * 0.18,
+                  left: 0,
+                  right: 0,
+                  child: Center(child: _buildBookSelectButton()),
+                ),
+
+                // ✅ 시작 버튼
+                Positioned(
+                  top: MediaQuery.of(context).size.height * 0.65 , // 버튼 높이 감안
+                  left: 0,
+                  right: 0,
+                  child: Center(
+                    child: ElevatedButton(
+                      onPressed: _startReading,
+                      style: ElevatedButton.styleFrom(
+                        shape: const CircleBorder(),
+                        padding: const EdgeInsets.all(40),
+                        backgroundColor: Colors.white24,
+                        foregroundColor: Colors.black,
+
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: const [
+                          Icon(Icons.play_arrow, size: 40, color: Colors.amberAccent),
+                          SizedBox(height: 4),
+                          Text(
+                            "시작",
+                            style: TextStyle(fontSize: 18, color: Colors.amberAccent, fontFamily: 'Kopub', fontWeight: FontWeight.w500),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNavItem(BuildContext context, IconData icon, int index) {
+    const int currentIndex = -1;
+    final bool isSelected = currentIndex == index;
+
+    return GestureDetector(
+      onTap: () {
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (_) => MainScreen(initialTabIndex: index)),
+              (route) => false,
+        );
+      },
+      child: Container(
+        padding: const EdgeInsets.all(8),
+        child: Icon(
+          icon,
+          color: isSelected ? Colors.white : Colors.grey[500],
+          size: 28,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBookSelectButton() {
+    final book = selectedBook;
+
+    return GestureDetector(
+      onTap: _openBookSearchDialog,
+      child: Center(
+        child: book != null
+            ? _buildBookInfoCard(book)
+            : Container(
+          width: MediaQuery.of(context).size.width * 0.55,
+          height: MediaQuery.of(context).size.width * 0.12,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: BoxDecoration(
+            color: Colors.white10,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: const [
+              Icon(Icons.search, color: Colors.white70),
+
+              Text(
+                "읽을 책 선택하기",
+                style: TextStyle(color: Colors.white60, fontSize: 16),
+              ),
+              SizedBox(height: 10),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBookInfoCard(Map<String, dynamic> book) {
+    final imageUrl = book['imageUrl'] ?? '';
+    final screenWidth = MediaQuery.of(context).size.width;
+    final coverWidth = screenWidth * 0.4; // 예: 화면의 40%
+    final coverHeight = coverWidth * 1.5;  // 일반 책 비율 2:3 → height = width × 1.5
+
+    final imageWidget = imageUrl.startsWith('http')
+        ? Image.network(
+      imageUrl,
+      width: coverWidth,
+      height: coverHeight,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) =>
+      const Icon(Icons.book, size: 60, color: Colors.white70),
+    )
+        : Image.asset(
+      imageUrl,
+      width: coverWidth,
+      height: coverHeight,
+      fit: BoxFit.cover,
+    );
+
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 표지 이미지
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: imageWidget,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              book['title'] ?? '',
+              style: const TextStyle(color: Colors.white, fontSize: 16,fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              book['author'] ?? '',
+              style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
+
+        // ❌ X 버튼 (이미지 위에 겹치게)
+        Positioned(
+          top: 0,
+          right: 0,
+          child: GestureDetector(
+            onTap: () => setState(() => selectedBook = null),
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.black45,
+                shape: BoxShape.circle,
+              ),
+              padding: const EdgeInsets.all(4),
+              child: const Icon(Icons.close, color: Colors.white, size: 16),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+}

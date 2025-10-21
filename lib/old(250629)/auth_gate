@@ -1,0 +1,143 @@
+import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'package:dayverse_book/main.dart';
+import 'package:dayverse_book/screen/login_screen.dart';
+import 'package:dayverse_book/model/book_model.dart';
+import 'package:dayverse_book/service/book_service.dart';
+import 'package:dayverse_book/provider/saved_books_provider.dart';
+import 'package:dayverse_book/provider/custom_library_provider.dart';
+import 'package:dayverse_book/provider/normal_challenge_provider.dart';
+import 'package:dayverse_book/provider/stage_challenge_provider.dart';
+
+class AuthGate extends StatelessWidget {
+  const AuthGate({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const _LoadingScreen();
+        }
+
+        if (snapshot.hasData) {
+          return FutureBuilder<List<dynamic>>(
+            future: _loadStartupData(context),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const _LoadingScreen();
+              }
+
+              if (!snapshot.hasData || snapshot.hasError || snapshot.data?[0] == false) {
+                return const Scaffold(
+                  backgroundColor: Color(0xFF0A1D27),
+                  body: Center(
+                    child: Text("데이터를 불러오지 못했습니다.", style: TextStyle(color: Colors.white)),
+                  ),
+                );
+              }
+
+              final bool showWelcome = snapshot.data?[1] == true;
+              debugPrint("[DEBUG] ✅ showWelcome 전달됨: $showWelcome");
+
+              // ✅ 여기서 pushReplacementNamed로 전달
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (navigatorKey.currentState?.mounted ?? false) {
+                  navigatorKey.currentState?.pushReplacementNamed(
+                    '/main',
+                    arguments: {'showWelcome': showWelcome},
+                  );
+                }
+              });
+
+              // ⚠️ 임시 로딩 화면 보여주기
+              return const _LoadingScreen();
+            },
+          );
+        } else {
+          return const LoginScreen();
+        }
+      },
+    );
+  }
+
+  /// ✅ 전체 시작 로딩 (책, 기록, 커스텀 서재, 챌린지 + 플래그)
+  Future<List<dynamic>> _loadStartupData(BuildContext context) async {
+    final prefs = await SharedPreferences.getInstance();
+    final bool justSignedUp = prefs.getBool('justSignedUp') ?? false;
+    debugPrint("[DEBUG] SharedPreferences: justSignedUp = $justSignedUp");
+
+    final bool userDataLoaded = await _loadUserData(context);
+
+    if (justSignedUp) {
+      await prefs.remove('justSignedUp');
+      debugPrint("[DEBUG] SharedPreferences: justSignedUp 플래그 제거 완료");
+    }
+
+    return [userDataLoaded, justSignedUp];
+  }
+
+  /// ✅ 유저 데이터 로드 (책 + 기록 + 서재 + 챌린지 상태)
+  Future<bool> _loadUserData(BuildContext context) async {
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      final email = FirebaseAuth.instance.currentUser?.email;
+      print("🚀 [AuthGate] 유저 데이터 불러오기 시작 - UID: $uid");
+      print("📧 로그인된 이메일: $email");
+
+      await BookService.initializeCustomLibrariesForOldBooks();
+
+      final rawBooks = await BookService.getBooksFromFirestore();
+      final List<BookModel> bookModels = rawBooks.map((raw) => BookModel.fromMap(raw)).toList();
+
+      final records = await BookService.getRecordsFromFirestore();
+
+      print("📚 변환 완료된 책 수: ${bookModels.length}");
+      print("📝 불러온 기록 수: ${records.length}");
+
+      final savedBooksProvider = Provider.of<SavedBooksProvider>(context, listen: false);
+      final customLibraryProvider = Provider.of<CustomLibraryProvider>(context, listen: false);
+      final normalProvider = Provider.of<NormalChallengeProvider>(context, listen: false);
+      final stageProvider = Provider.of<StageChallengeProvider>(context, listen: false);
+
+      // 🔄 데이터 적용
+      await Future.microtask(() {
+        savedBooksProvider.clearData();
+        savedBooksProvider.setBooks(bookModels);
+        savedBooksProvider.setRecords(records);
+      });
+
+      await customLibraryProvider.fetchLibraries();
+
+      for (final challenge in normalProvider.allChallenges) {
+        normalProvider.refreshChallengeStatus(challenge.id, savedBooks: bookModels);
+      }
+      for (final challenge in stageProvider.allChallenges) {
+        stageProvider.refreshChallengeStatus(challenge.id, savedBooks: bookModels);
+      }
+
+      return true;
+    } catch (e) {
+      print("🔥 [ERROR] 유저 데이터 로드 실패: $e");
+      return false;
+    }
+  }
+}
+
+class _LoadingScreen extends StatelessWidget {
+  const _LoadingScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      backgroundColor: Color(0xFF0A1D27),
+      body: Center(
+        child: CircularProgressIndicator(color: Colors.amberAccent),
+      ),
+    );
+  }
+}

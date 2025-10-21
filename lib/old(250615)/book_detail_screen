@@ -1,0 +1,933 @@
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
+import 'package:dayverse_book/model/book_model.dart';
+import 'package:dayverse_book/provider/saved_books_provider.dart';
+import 'package:dayverse_book/provider/custom_library_provider.dart';
+import 'package:dayverse_book/provider/normal_challenge_provider.dart';
+import 'package:dayverse_book/service/reading_log_service.dart';
+import 'package:dayverse_book/widget/page_input_dialog.dart';
+
+
+
+class BookDetailScreen extends StatefulWidget {
+  final BookModel book;
+
+  const BookDetailScreen({super.key, required this.book});
+
+  @override
+  State<BookDetailScreen> createState() => _BookDetailScreenState();
+}
+
+class _BookDetailScreenState extends State<BookDetailScreen> {
+  String? startDate;
+  String? endDate;
+  bool _showTimerRecords = false;
+  List<Map<String, dynamic>> _timerLogs = [];
+
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTimerLogs();
+  }
+  Future<void> _loadTimerLogs() async {
+    final logs = await ReadingLogService.getTimerLogsForBook(widget.book.id);
+    if (mounted) setState(() => _timerLogs = logs);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final records = context.watch<SavedBooksProvider>().getRecordsForBook(widget.book.id);
+
+    return GestureDetector(
+      onHorizontalDragUpdate: (details) {
+        if (details.delta.dx > 20) Navigator.pop(context);
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFF0A1D27),
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.white),
+            onPressed: () => Navigator.pop(context),
+          ),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.delete, color: Colors.white),
+              onPressed: _confirmDeleteBook,
+            ),
+          ],
+        ),
+        body: Consumer<SavedBooksProvider>(
+          builder: (context, provider, _) {
+            final records = provider.getRecordsForBook(widget.book.id);
+            return SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildBookInfo(),
+                  const SizedBox(height: 12),
+                  const Divider(color: Colors.white38, thickness: 1, height: 30),
+                  _buildReadingStatus(),
+                  const SizedBox(height: 12),
+                  _buildTimerRecordSection(_timerLogs),
+                  const SizedBox(height: 12),
+                  _buildLibrarySection(),
+                  const SizedBox(height: 12),
+                  _buildMemoSection(records),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBookInfo() {
+    final book = widget.book;
+
+    final title = book.title;
+    final author = book.author;
+    final publisher = book.publisher;
+    final isbn = (book.isbn?.isNotEmpty == true) ? book.isbn! : "알 수 없음";
+    final imageUrl = book.imageUrl ?? '';
+    final pageCount = (book.pageCount > 0) ? "${book.pageCount}쪽" : "알 수 없음";
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: imageUrl.startsWith("http")
+              ? Image.network(
+            imageUrl,
+            width: 120,
+            height: 170,
+            fit: BoxFit.contain,
+            errorBuilder: (context, error, stackTrace) => Container(
+              width: 120,
+              height: 170,
+              color: Colors.grey,
+              child: const Icon(Icons.book, color: Colors.white, size: 40),
+            ),
+          )
+              : Image.asset(
+            imageUrl,
+            width: 120,
+            height: 170,
+            fit: BoxFit.cover,
+          ),
+        ),
+        const SizedBox(width: 15),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontFamily: 'kopub',
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 5),
+              Text("저자: $author",
+                  style: const TextStyle(
+                      color: Colors.white70,
+                      fontFamily: 'kopub',
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16)),
+              const SizedBox(height: 3),
+              Text("출판사: $publisher",
+                  style: const TextStyle(
+                      color: Colors.white70,
+                      fontFamily: 'kopub',
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16)),
+              const SizedBox(height: 3),
+              Text("ISBN: $isbn",
+                  style: const TextStyle(
+                      color: Colors.white70,
+                      fontFamily: 'kopub',
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16)),
+              const SizedBox(height: 3),
+              Text("총 페이지수: $pageCount",
+                  style: const TextStyle(
+                      color: Colors.white70,
+                      fontFamily: 'kopub',
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildReadingStatus() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Color(0xFF0A1D27),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          GestureDetector(
+            onTap: _changeCategory,
+            child: Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: const Color(0xFF0A1D27),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Icon(Icons.book, size: 25, color: Colors.amberAccent),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              _getCategoryDescription(widget.book.category, startDate, endDate),
+              style: const TextStyle(fontSize: 16, fontFamily: "Kopub", fontWeight: FontWeight.w500, color: Colors.white),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLibrarySection() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Color(0xFF0A1D27),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          GestureDetector(
+            onTap: _openLibraryAssignDialog,
+            child: Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: const Color(0xFF0A1D27),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Icon(Icons.folder, size: 25, color: Colors.amberAccent),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(child: _buildCurrentLibrariesInline()),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTimerRecordSection(List<Map<String, dynamic>> logs) {
+    final totalMinutes = logs.fold<int>(
+      0,
+          (sum, r) => sum + ((r['durationMinutes'] ?? 0) as num).toInt(),
+    );
+
+    final int hours = totalMinutes ~/ 60;
+    final int minutes = totalMinutes % 60;
+    final totalTimeText = logs.isNotEmpty
+        ? (hours > 0 ? "$hours시간 ${minutes}분 읽었어요!" : "$minutes분 읽었어요!")
+        : "아직 읽지 않았어요.";
+
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF0A1D27),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          GestureDetector(
+            onTap: () => _openTimerRecordViewer(logs),
+            child: Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: const Color(0xFF0A1D27),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Icon(Icons.schedule, color: Colors.amberAccent, size: 25),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              totalTimeText,
+              style: const TextStyle(
+                fontSize: 16,
+                fontFamily: "Kopub",
+                fontWeight: FontWeight.w500,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _openTimerRecordViewer(List<Map<String, dynamic>> logs) {
+    if (logs.isEmpty) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text("기록이 비어 있어요 🌱", style: TextStyle(fontWeight: FontWeight.bold)),
+          content: const Text("타이머를 사용해 첫 독서 기록을 남겨보세요!"),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text("좋아요!", style: TextStyle(color: Colors.amberAccent)),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Padding(
+        padding: MediaQuery.of(context).viewInsets,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+          height: MediaQuery.of(context).size.height * 0.75,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                "독서 시간 기록",
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 12),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: logs.length,
+                  itemBuilder: (context, index) {
+                    final record = logs[index];
+                    final start = DateTime.tryParse(record['startTime'] ?? '');
+                    final end = DateTime.tryParse(record['endTime'] ?? '');
+                    final duration = record['durationMinutes'] ?? 0;
+                    final recordId = record['recordId'];
+
+                    final dateStr = start != null ? DateFormat('yy/MM/dd').format(start) : '';
+                    final startStr = start != null ? DateFormat('HH:mm').format(start) : '';
+                    final endStr = end != null ? DateFormat('HH:mm').format(end) : '';
+
+                    return Dismissible(
+                      key: Key(recordId ?? UniqueKey().toString()),
+                      direction: DismissDirection.endToStart,
+                      confirmDismiss: (_) async {
+                        final confirm = await showDialog<bool>(
+                          context: context,
+                          builder: (ctx) => AlertDialog(
+                            title: const Text("기록 삭제"),
+                            content: const Text("이 독서 시간 기록을 삭제할까요?"),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.of(ctx).pop(true),
+                                child: const Text("삭제", style: TextStyle(color: Colors.redAccent)),
+                              ),
+                              TextButton(
+                                onPressed: () => Navigator.of(ctx).pop(false),
+                                child: const Text("취소"),
+                              ),
+                            ],
+                          ),
+                        );
+
+                        if (confirm == true && recordId != null) {
+                          await ReadingLogService.deleteTimerLog(recordId);
+                          await _loadTimerLogs(); // 갱신
+                          return true;
+                        }
+                        return false;
+                      },
+                      background: Container(
+                        alignment: Alignment.centerRight,
+                        padding: const EdgeInsets.only(right: 20),
+                        color: Colors.red,
+                        child: const Icon(Icons.delete, color: Colors.white),
+                      ),
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              "$dateStr ($startStr~$endStr)",
+                              style: const TextStyle(fontSize: 14),
+                            ),
+                            Text(
+                              "$duration분",
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.deepOrange,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _getTotalReadingTimeStr() {
+    final total = _timerLogs.fold<int>(
+      0,
+          (sum, r) => sum + ((r['durationMinutes'] ?? 0) as num).toInt(),
+    );
+
+    final hours = total ~/ 60;
+    final minutes = total % 60;
+    return hours > 0 ? "$hours시간 ${minutes}분 읽었어요!" : "$minutes분 읽었어요!";
+  }
+
+  Widget _buildMemoSection(List<Map<String, dynamic>> records) {
+    final memos = records.where((r) => r['content'] != '독서 타이머 기록').toList();
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        GestureDetector(
+          onTap: () => _openRecordEditor(),
+          child: Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: const Color(0xFF0A1D27),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: const Icon(Icons.edit_note_outlined, size: 25, color: Colors.amberAccent),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (memos.isEmpty)
+                Container(
+                  height: 32,
+                  alignment: Alignment.centerLeft,
+                  child: GestureDetector(
+                    onTap: () => _openRecordEditor(),
+                    child: const Text(
+                      "아이콘을 눌러 기록을 남겨보세요.",
+                      style: TextStyle(color: Colors.white, fontSize: 16),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+              if (memos.isNotEmpty)
+                ...memos.map((record) => _buildMemoItem(record)).toList(),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMemoItem(Map<String, dynamic> record) {
+    return Dismissible(
+      key: UniqueKey(),
+      direction: DismissDirection.endToStart,
+      confirmDismiss: (direction) async {
+        final confirm = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text("기록 삭제", style: TextStyle(fontFamily: 'kopub', fontWeight: FontWeight.bold)),
+            content: const Text("이 기록을 삭제할까요?", style: TextStyle(fontFamily: 'kopub', fontSize: 16)),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text("삭제", style: TextStyle(color: Colors.redAccent)),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text("취소"),
+              ),
+            ],
+          ),
+        );
+
+        if (confirm == true) {
+          final provider = Provider.of<SavedBooksProvider>(context, listen: false);
+          await provider.deleteRecord(widget.book.id, record['savedAt'], record['content']);
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text("기록이 삭제되었습니다!", style: TextStyle(color: Colors.black)),
+                backgroundColor: Colors.amberAccent,
+                duration: Duration(milliseconds: 1000),
+              ),
+            );
+          }
+          return true;
+        } else {
+          return false;
+        }
+      },
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        color: Colors.red,
+        child: const Icon(Icons.delete, color: Colors.white),
+      ),
+      child: GestureDetector(
+        onTap: () => _openRecordEditor(
+          initialContent: record['content'],
+          isEditing: true,
+          record: record,
+        ),
+        child: Container(
+          width: double.infinity,
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.white10,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _formatDateTime(record['savedAt'] ?? DateTime.now().toString()),
+                style: const TextStyle(color: Colors.white60, fontFamily: 'kopub', fontSize: 12),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                record['content'] ?? '',
+                style: const TextStyle(color: Colors.white, fontFamily: 'kopub', fontWeight: FontWeight.w500, fontSize: 16, letterSpacing: 1),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _formatDateTime(String date) {
+    try {
+      final parsed = DateTime.parse(date);
+      return DateFormat('yy/MM/dd HH:mm').format(parsed);
+    } catch (_) {
+      return date;
+    }
+  }
+
+  void _openRecordEditor({String? initialContent, bool isEditing = false, Map<String, dynamic>? record}) {
+    final provider = Provider.of<SavedBooksProvider>(context, listen: false);
+    final controller = TextEditingController(text: initialContent ?? "");
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Padding(
+        padding: MediaQuery.of(context).viewInsets,
+        child: Container(
+          height: MediaQuery.of(context).size.height * 0.75,
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    DateFormat('yy.MM.dd HH:mm').format(DateTime.now()),
+                    style: const TextStyle(fontSize: 16, fontFamily: 'kopub', fontWeight: FontWeight.bold),
+                  ),
+                  Row(
+                    children: [
+                      if (isEditing)
+                        IconButton(
+                          icon: const Icon(Icons.delete, color: Colors.redAccent),
+                          onPressed: () async {
+                            Navigator.pop(context);
+                            await _deleteRecord(record!);
+                          },
+                        ),
+                      IconButton(
+                        icon: const Icon(Icons.check, color: Color(0xFF0A1D27)),
+                        onPressed: () async {
+                          final newContent = controller.text.trim();
+                          if (newContent.isEmpty) return;
+
+                          if (isEditing && record != null) {
+                            await provider.updateRecordByContent(widget.book.id, record['savedAt'], record['content'], newContent);
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text("기록이 수정되었습니다!", style: TextStyle(color: Colors.black, fontSize: 16)),
+                                backgroundColor: Colors.amberAccent,
+                              ),
+                            );
+                          } else {
+                            await provider.addRecord(widget.book.id, newContent);
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text("기록이 추가되었습니다!", style: TextStyle(color: Colors.black, fontSize: 16)),
+                                backgroundColor: Colors.amberAccent,
+                              ),
+                            );
+                          }
+                          Navigator.pop(context);
+                        },
+                      ),
+                    ],
+                  )
+                ],
+              ),
+              const SizedBox(height: 10),
+              Expanded(
+                child: TextField(
+                  controller: controller,
+                  autofocus: true,
+                  maxLines: null,
+                  style: const TextStyle(fontSize: 18, fontFamily: 'kopub'),
+                  decoration: const InputDecoration(
+                    hintText: "기록을 작성해보세요...",
+                    border: InputBorder.none,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<bool?> _confirmDeleteRecord() {
+    return showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("삭제하시겠습니까?"),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text("예")),
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text("아니요")),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _deleteRecord(Map<String, dynamic> record) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("기록 삭제", style: TextStyle(fontFamily: 'kopub', fontWeight: FontWeight.bold)),
+        content: const Text("이 기록을 삭제할까요?", style: TextStyle(fontFamily: 'kopub',fontSize: 16)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text("삭제", style: TextStyle(color: Colors.redAccent)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text("취소"),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      final provider = Provider.of<SavedBooksProvider>(context, listen: false);
+      await provider.deleteRecord(widget.book.id, record['savedAt'], record['content']);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("기록이 삭제되었습니다!", style: TextStyle(color: Colors.black)),
+          backgroundColor: Colors.amberAccent,
+        ),
+      );
+    }
+  }
+
+  void _changeCategory() {
+    showModalBottomSheet(
+      context: context,
+      builder: (BuildContext context) {
+        return Container(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                title: const Text("읽은 책", style: TextStyle(fontFamily: 'kopub')),
+                onTap: () async {
+                  final start = await _pickDate(true);
+                  final end = await _pickDate(false);
+                  _updateCategory("done", startDateStr: start, endDateStr: end);
+                },
+              ),
+              ListTile(
+                title: const Text("읽는 중인 책", style: TextStyle(fontFamily: 'kopub')),
+                onTap: () async {
+                  final start = await _pickDate(true);
+                  _updateCategory("reading", startDateStr: start);
+                },
+              ),
+              ListTile(
+                title: const Text("읽을 예정인 책", style: TextStyle(fontFamily: 'kopub')),
+                onTap: () => _updateCategory("want"),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _updateCategory(String newCategory, {String? startDateStr, String? endDateStr}) {
+    final provider = Provider.of<SavedBooksProvider>(context, listen: false);
+
+    // 문자열로 받은 날짜를 DateTime으로 파싱 (null 처리)
+    final startDate = (startDateStr != null && startDateStr.isNotEmpty) ? DateTime.tryParse(startDateStr) : null;
+    final endDate = (endDateStr != null && endDateStr.isNotEmpty) ? DateTime.tryParse(endDateStr) : null;
+
+    // 카테고리 업데이트
+    provider.updateCategory(widget.book.id, newCategory);
+
+    // 날짜 업데이트 (Provider 메서드를 사용)
+    provider.updateBookDates(widget.book.id, startDate: startDate, endDate: endDate);
+
+    Navigator.pop(context);
+  }
+
+  String _getCategoryDescription(String? category, String? start, String? end) {
+    switch (category) {
+      case "done":
+        return "${_formatDisplayDate(start ?? '')} ~ ${_formatDisplayDate(end ?? '')} 까지 읽었어요!";
+      case "reading":
+        return "${_formatDisplayDate(start ?? '')} 부터 읽고 있어요!";
+      case "want":
+        return "곧 읽을 책이에요!";
+      default:
+        return "";
+    }
+  }
+
+  String _formatDisplayDate(String date) {
+    try {
+      final parsed = DateTime.parse(date);
+      return DateFormat('yy/MM/dd').format(parsed);
+    } catch (_) {
+      return date;
+    }
+  }
+
+  Future<String?> _pickDate(bool isStartDate) async {
+    DateTime now = DateTime.now();
+    DateTime? pickedDate = await showDatePicker(
+      context: context,
+      initialDate: now,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+
+    if (pickedDate != null) {
+      return DateFormat('yyyy-MM-dd').format(pickedDate);
+    }
+    return null;
+  }
+
+  // ✅ 서재 위치 파트
+  void _openLibraryAssignDialog() {
+    final customLibraryProvider =
+    Provider.of<CustomLibraryProvider>(context, listen: false);
+    final bookId = widget.book.id;
+    final libraries = customLibraryProvider.libraries;
+
+    // 서재가 없는 경우 안내
+    if (libraries.isEmpty) {
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          backgroundColor: Colors.white,
+          shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          title: const Text("등록된 서재가 없습니다",
+              style: TextStyle(
+                color: Color(0xFF0A1D27),
+                fontFamily: 'kopub',
+              )),
+          content: const Text("서재에 추가하려면 먼저 서재를 생성해주세요!",
+              style: TextStyle(
+                color: Color(0xFF0A1D27),
+                fontFamily: 'kopub',
+              )),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("확인",
+                  style: TextStyle(
+                    color: Colors.amberAccent,
+                    fontFamily: 'kopub',
+                  )),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    //  다이얼로그 with 실시간 상태 업데이트
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: libraries.keys.map((libraryName) {
+                  final isInLibrary = libraries[libraryName]!.contains(bookId);
+                  return CheckboxListTile(
+                    title: Text(libraryName,
+                        style: const TextStyle(
+                          color: Color(0xFF0A1D27),
+                          fontFamily: 'kopub',
+                          fontWeight: FontWeight.bold,
+                        )),
+                    value: isInLibrary,
+                    activeColor: Colors.amberAccent,
+                    checkColor: Colors.black,
+                    onChanged: (value) {
+                      setModalState(() {
+                        if (value == true) {
+                          customLibraryProvider.addBookToLibrary(
+                              libraryName, bookId);
+                        } else {
+                          customLibraryProvider.removeBookFromCustomLibrary(
+                              libraryName, bookId);
+                        }
+                      });
+                      setState(() {}); // 외부 상태도 동기화
+                    },
+                  );
+                }).toList(),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildCurrentLibrariesInline() {
+    final customLibraryProvider = Provider.of<CustomLibraryProvider>(context);
+    final bookId = widget.book.id;
+    final libraries = customLibraryProvider.libraries.entries
+        .where((entry) => entry.value.contains(bookId))
+        .map((entry) => entry.key)
+        .toList();
+
+    if (libraries.isEmpty) {
+      return const Text(
+        "아직 어떤 서재에도 속해있지 않아요.",
+        style: TextStyle(color: Colors.white, fontSize: 16), //
+        overflow: TextOverflow.ellipsis,
+      );
+    }
+    return Wrap(
+      spacing: 6,
+      runSpacing: 4,
+      children: libraries.map((name) {
+        return Column(
+          children: [
+            SizedBox(height: 5),
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 10),
+              decoration: BoxDecoration(
+                color: Colors.white10,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                name,
+                style: const TextStyle(
+                    color: Colors.white, fontFamily: 'kopub', fontSize: 16,),
+              ),
+            ),
+          ],
+        );
+      }).toList(),
+    );
+  }
+
+  void _confirmDeleteBook() async {
+    final confirm = await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("책 삭제", style: TextStyle(fontFamily: 'Kopub', fontWeight: FontWeight.bold),),
+        content: const Text("정말 이 책을 삭제할까요? \n책과 관련된 모든 기록이 사라져요!", style: TextStyle(fontFamily: 'Kopub', fontSize: 16),),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text("삭제", style: TextStyle(color: Colors.redAccent)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text("취소"),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      final bookId = widget.book.id;
+      Provider.of<SavedBooksProvider>(context, listen: false)
+          .removeBook(bookId, Provider.of<CustomLibraryProvider>(context, listen: false));
+      Navigator.pop(context);
+    }
+  }
+
+}

@@ -1,0 +1,468 @@
+import 'package:flutter/material.dart';
+import 'package:dayverse_book/model/challenge_model.dart';
+import 'package:dayverse_book/model/challenge_attempt_model.dart';
+import 'package:dayverse_book/provider/saved_books_provider.dart';
+import 'package:dayverse_book/utils/challenge_progress_utils.dart';
+import 'package:dayverse_book/service/challenge_record_service.dart';
+import 'package:provider/provider.dart';
+
+class ChallengeDoneScreen extends StatefulWidget {
+  final Challenge challenge;
+
+  const ChallengeDoneScreen({super.key, required this.challenge});
+
+  @override
+  State<ChallengeDoneScreen> createState() => _ChallengeDoneScreenState();
+}
+
+class _ChallengeDoneScreenState extends State<ChallengeDoneScreen> {
+  bool showDetails = false;
+  Map<String, dynamic>? recordData;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadChallengeRecord();
+  }
+
+  Future<void> _loadChallengeRecord() async {
+    final data = await ChallengeRecordService.fetchChallengeRecord(widget.challenge.id);
+    setState(() {
+      recordData = data;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final challenge = widget.challenge;
+    final savedBooks = context.read<SavedBooksProvider>().savedBooks;
+
+    if (recordData == null) {
+      return const Scaffold(
+        backgroundColor: Color(0xFF013328),
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    final progress = 1.0;
+    final completed = ChallengeProgressUtils.getCompletedCount(challenge, challenge.kind == ChallengeKind.routine ? recordData! : savedBooks);
+    final total = ChallengeProgressUtils.getTargetCount(challenge);
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF013328),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        centerTitle: true,
+        title: Text(
+          challenge.title,
+          style: const TextStyle(
+            color: Colors.white,
+            fontFamily: 'kopub',
+            fontSize: 20,
+          ),
+        ),
+        iconTheme: const IconThemeData(color: Colors.white),
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildCelebrationCard(),
+              const SizedBox(height: 16),
+              _buildImage(challenge.imageUrl),
+              const SizedBox(height: 20),
+              const Divider(color: Colors.white24),
+              const SizedBox(height: 10),
+
+              Text(
+                challenge.title,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontFamily: 'kopub',
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+
+              const SizedBox(height: 20),
+              _buildCompletionCard(progress, completed, total),
+              const SizedBox(height: 16),
+              const Text("🔸 도전 기록", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+              const SizedBox(height: 12),
+
+              _buildChallengeRecordSection(challenge), // ✅ 여기에 도전 기록(기간+책목록) 통합
+
+              const SizedBox(height: 20),
+              const Divider(color: Colors.white24),
+              const SizedBox(height: 16),
+
+              _buildSummaryCard(challenge),         // ✅ 6. 챌린지 요약
+              const SizedBox(height: 20),
+
+              if (challenge.badgeImage != null)    // ✅ 7. 리워드 이미지
+                _buildRewardBadge(challenge.badgeImage!),
+              const SizedBox(height: 20),
+
+              const SizedBox(height: 20),
+
+              const Divider(color: Colors.white24), // ✅ 9. 상세 정보 영역
+              const SizedBox(height: 10),
+
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  onPressed: () {
+                    setState(() => showDetails = !showDetails);
+                  },
+                  icon: Text(
+                    showDetails ? "챌린지 상세내용 접기" : "📂 챌린지 상세보기",
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontFamily: 'kopub',
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  label: Icon(
+                    showDetails ? Icons.expand_less : Icons.expand_more,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+
+              AnimatedCrossFade(
+                duration: const Duration(milliseconds: 300),
+                crossFadeState: showDetails ? CrossFadeState.showFirst : CrossFadeState.showSecond,
+                firstChild: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (challenge.longDescription?.isNotEmpty == true)
+                      _buildDescriptionSection("📖 챌린지 소개", challenge.longDescription!),
+                    if (challenge.goalDescription?.isNotEmpty == true)
+                      _buildDescriptionSection("🎯 도전 목표", challenge.goalDescription!),
+                    if (challenge.recommendedFor?.isNotEmpty == true)
+                      _buildDescriptionSection("🙋 이런 분께 추천", challenge.recommendedFor!),
+                    if (challenge.guideText?.isNotEmpty == true)
+                      _buildDescriptionSection("📌 진행 방법", challenge.guideText!),
+                  ],
+                ),
+                secondChild: const SizedBox.shrink(),
+              ),
+              const SizedBox(height: 100),
+            ]
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCelebrationCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.amberAccent.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.amberAccent, width: 2),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: const [
+          Icon(Icons.emoji_events, color: Colors.amberAccent, size: 60),
+
+          SizedBox(height: 8),
+
+        ],
+      ),
+    );
+  }
+
+  Widget _buildImage(String url) => ClipRRect(
+    borderRadius: BorderRadius.circular(12),
+    child: Image.asset(
+      url,
+      width: double.infinity,
+      height: 400,
+      fit: BoxFit.cover,
+    ),
+  );
+
+  Widget _buildCompletionCard(double progress, int completed, int total) {
+    final isRoutine = widget.challenge.kind == ChallengeKind.routine;
+    final unit = isRoutine ? "일" : "권";
+
+    final attempts = widget.challenge.attempts;
+    final lastAttempt = attempts.isNotEmpty ? attempts.last : null;
+
+    int fixedCompleted = completed;
+    int fixedTotal = total;
+
+    if (isRoutine && lastAttempt != null && lastAttempt.startDate != null && lastAttempt.endDate != null) {
+      final start = DateTime(lastAttempt.startDate.year, lastAttempt.startDate.month, lastAttempt.startDate.day);
+      final end = DateTime(lastAttempt.endDate!.year, lastAttempt.endDate!.month, lastAttempt.endDate!.day);
+      fixedTotal = end.difference(start).inDays + 1;
+      // 기록된 체크 수 (루틴 체크가 recordData['routineChecks']에 들어있어야 정확하지만, 없으면 그냥 total 사용)
+      fixedCompleted = fixedTotal; // 이미 성공한 챌린지니까 무조건 다 했다고 간주
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white10,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: const Text(
+              "🎉 축하합니다! 해내셨군요! 🎉",
+              style: TextStyle(
+                color: Colors.amberAccent,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                fontFamily: 'Kopub',
+                letterSpacing: 1.2,
+              ),
+            ),
+          ),
+          Center(
+            child: const Text(
+              "더욱 성장하시길 응원합니다 ☀️",
+              style: TextStyle(
+                color: Colors.amberAccent,
+                fontSize: 15,
+                fontWeight: FontWeight.bold,
+                fontFamily: 'Kopub',
+                letterSpacing: 1.2,
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          LinearProgressIndicator(
+            value: 1.0,
+            backgroundColor: Colors.white24,
+            valueColor: const AlwaysStoppedAnimation<Color>(Colors.amberAccent),
+            minHeight: 8,
+          ),
+          const SizedBox(height: 12),
+          Text(
+            "100% 완료  ($fixedCompleted / $fixedTotal $unit)",
+            style: const TextStyle(
+              color: Colors.white,
+              fontFamily: 'kopub',
+              fontSize: 15,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChallengeRecordSection(Challenge challenge) {
+    final attempts = challenge.attempts;
+    if (attempts.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+
+        ...attempts.asMap().entries.map((entry) {
+          final index = entry.key + 1;
+          final attempt = entry.value;
+          final start = attempt.startDate?.toLocal();
+          final end = attempt.endDate?.toLocal();
+
+          final dateStr = (start != null && end != null)
+              ? " ${start.year}.${start.month}.${start.day} ~ ${end.year}.${end.month}.${end.day}"
+              : " 날짜 정보 없음";
+
+          final books = attempt.participatedBooks ?? [];
+
+          return Container(
+            width: double.infinity,
+            margin: EdgeInsets.only(bottom: entry.key == attempts.length - 1 ? 0 : 20),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.white10,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  dateStr,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontFamily: 'Kopub',
+                    fontWeight: FontWeight.w600,
+                    fontSize: 16,
+                  ),
+                ),
+                if (books.isNotEmpty)
+                  const SizedBox(height: 12),
+                Wrap(
+                    spacing: 12,
+                    runSpacing: 16,
+                    children: books.map((book) {
+                      return SizedBox(
+                        width: 70,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            AspectRatio(
+                              aspectRatio: 2 / 3,
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.network(
+                                  book['imageUrl'] ?? '',
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) => Container(
+                                    color: Colors.grey.shade700,
+                                    child: const Icon(Icons.menu_book, color: Colors.white),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              book['title'] ?? '',
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12,
+                                height: 1.2,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                  ),
+              ],
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
+
+  Widget _buildSummaryCard(Challenge challenge) {
+    final typeText = _getChallengeTypeText(challenge.kind);
+
+    String durationText;
+    if (challenge.attemptMode == ChallengeAttemptMode.periodBased) {
+      if (challenge.startDate != null && challenge.endDate != null) {
+        durationText = "${challenge.startDate!.toLocal().year}.${challenge.startDate!.toLocal().month}.${challenge.startDate!.toLocal().day} ~ "
+            "${challenge.endDate!.toLocal().year}.${challenge.endDate!.toLocal().month}.${challenge.endDate!.toLocal().day}";
+      } else {
+        durationText = "기간 미정";
+      }
+    } else if (challenge.attemptMode == ChallengeAttemptMode.daysBased && challenge.durationOptions != null && challenge.durationOptions!.isNotEmpty) {
+      durationText = challenge.durationOptions!.map((d) => "$d일").join(" / ");
+    } else if (challenge.attemptMode == ChallengeAttemptMode.countBased && challenge.checkCountOptions != null && challenge.checkCountOptions!.isNotEmpty) {
+      durationText = challenge.checkCountOptions!.map((c) => "$c회").join(" / ");
+    } else {
+      durationText = "도전 정보 없음";
+    }
+
+    return Column(
+      children: [
+        _buildInfoCard("💡 한줄 소개", challenge.shortDescription),
+        _buildInfoCard("📂 챌린지 유형", typeText),
+        _buildInfoCard("🗓 도전 정보", durationText),
+        _buildInfoCard("🏅 리워드", challenge.rewardTitle),
+      ],
+    );
+  }
+
+  Widget _buildRewardBadge(String imageUrl) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        const SizedBox(height: 12),
+        const Text("🏅 획득한 리워드", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+        const SizedBox(height: 8),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: Image.asset(imageUrl, width: 120, height: 120, fit: BoxFit.cover),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildInfoCard(String title, String value) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(12)),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(title,
+              style: const TextStyle(
+                  color: Colors.white70, fontFamily: 'kopub', fontSize: 16, fontWeight: FontWeight.bold)),
+          Flexible(
+            child: Text(value,
+                textAlign: TextAlign.right,
+                style: const TextStyle(color: Colors.white, fontFamily: 'kopub', fontSize: 16)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _getChallengeTypeText(ChallengeKind kind) {
+    switch (kind) {
+      case ChallengeKind.routine:
+        return "루틴 챌린지";
+      case ChallengeKind.goal:
+        return "정복 챌린지";
+      case ChallengeKind.theme:
+        return "테마 챌린지";
+    }
+  }
+
+  Widget _buildDescriptionSection(String title, String content) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white10,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        fontFamily: 'kopub')),
+                const SizedBox(height: 6),
+                Text(content,
+                    style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 15,
+                        height: 1.4,
+                        fontFamily: 'kopub')),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

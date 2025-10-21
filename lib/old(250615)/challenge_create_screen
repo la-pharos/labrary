@@ -1,0 +1,141 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'dart:io';
+import 'package:image_picker/image_picker.dart';
+import 'package:dayverse_book/old(250615)/challenge_provider.dart';
+import 'package:dayverse_book/model/challenge_model.dart';
+import 'package:dayverse_book/model/series_model.dart';
+
+class ChallengeCreateScreen extends StatefulWidget {
+  const ChallengeCreateScreen({super.key});
+
+  @override
+  State<ChallengeCreateScreen> createState() => _ChallengeCreateScreenState();
+}
+
+class _ChallengeCreateScreenState extends State<ChallengeCreateScreen> {
+  final _titleController = TextEditingController();
+  final _descriptionController = TextEditingController();
+  final _goalController = TextEditingController();
+  final _searchController = TextEditingController();
+  final TextEditingController longDescriptionController = TextEditingController();
+
+  ChallengeType? _selectedType;
+  ChallengeMethod? _selectedMethod;
+  ChallengePeriod? _selectedPeriod;
+  ChallengeCheckMode? _selectedCheckType;
+  DateTime? _startDate;
+  DateTime? _endDate;
+
+  File? _selectedImage;
+
+  List<Map<String, String>> _searchResults = [];
+  List<Map<String, dynamic>> _selectedBooks = [];
+  List<Series> _seriesList = [];
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _descriptionController.dispose();
+    _goalController.dispose();
+    _searchController.dispose();
+    longDescriptionController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickDate({required bool isStart}) async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now(),
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+    if (picked != null) {
+      setState(() {
+        if (isStart) {
+          _startDate = picked;
+          _endDate = null;
+        } else {
+          if (_startDate != null && picked.isAfter(_startDate!)) {
+            _endDate = picked;
+          }
+        }
+      });
+    }
+  }
+
+  Future<void> _pickImage() async {
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+    if (pickedFile != null) {
+      setState(() {
+        _selectedImage = File(pickedFile.path);
+      });
+    }
+  }
+
+  void _submitChallenge() {
+    final title = _titleController.text.trim();
+    final description = _descriptionController.text.trim();
+
+    if (title.isEmpty || description.isEmpty || _selectedType == null || _selectedMethod == null || _selectedPeriod == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("모든 필수 항목을 입력해주세요.")),
+      );
+      return;
+    }
+
+    if (_selectedPeriod == ChallengePeriod.periodBased && (_startDate == null || _endDate == null)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("도전 시작일과 종료일을 입력해주세요.")),
+      );
+      return;
+    }
+
+    int? totalBooks;
+    if (_selectedMethod == ChallengeMethod.quantityBased) {
+      totalBooks = int.tryParse(_goalController.text.trim());
+      if (totalBooks == null || totalBooks <= 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("목표 권수를 올바르게 입력해주세요.")),
+        );
+        return;
+      }
+    }
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        backgroundColor: Colors.greenAccent,
+        content: const Text(
+          "챌린지가 생성되었습니다!",
+          style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+        ),
+      ),
+    );
+
+    Future.delayed(const Duration(seconds: 2), () {
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      Navigator.of(context).pop();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF013328),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        title: const Text("챌린지 생성", style: TextStyle(color: Colors.white)),
+      ),
+      body: Center(
+        child: ElevatedButton(
+          onPressed: _submitChallenge,
+          child: const Text("챌린지 제출"),
+        ),
+      ),
+    );
+  }
+}

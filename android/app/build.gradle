@@ -1,0 +1,82 @@
+plugins {
+    id "com.android.application"
+    id "kotlin-android"
+    id "dev.flutter.flutter-gradle-plugin"
+    id "com.google.gms.google-services"
+}
+
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+} else {
+    throw new GradleException("key.properties file not found at: ${keystorePropertiesFile.path}")
+}
+
+android {
+    namespace = "com.la_pharos.labrary"
+
+    // 🔼 FlutterFire 최신 조합 권장값
+    compileSdk = 35
+
+    defaultConfig {
+        applicationId = "com.la_pharos.labrary"
+        minSdk = 23          // ✅ 최신 Firebase 패키지 권장
+        targetSdk = 35
+
+        versionCode = flutter.versionCode
+        versionName = flutter.versionName
+    }
+
+    // 🔼 AGP 8.x + JDK 17 권장
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
+    signingConfigs {
+        release {
+            def storeFilePath = keystoreProperties['storeFile']
+            println "📦 storeFilePath = ${storeFilePath}"
+            if (storeFilePath == null || storeFilePath.trim().isEmpty()) {
+                throw new GradleException("storeFile is missing or empty in key.properties")
+            }
+            storeFile file(storeFilePath)
+            storePassword keystoreProperties['storePassword']
+            keyAlias keystoreProperties['keyAlias']
+            keyPassword keystoreProperties['keyPassword']
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig signingConfigs.release
+
+            // ✅ 난독화 + 최적화
+            minifyEnabled true
+            // ✅ 사용되지 않는 리소스 제거
+            shrinkResources true
+
+            // ✅ 기본 R8 규칙 + 우리 규칙 파일
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'),
+                    'proguard-rules.pro'
+
+            // ✅ 네이티브 심볼(zip) 생성 (아래 2)번과 연결)
+            ndk {
+                debugSymbolLevel 'FULL'   // 또는 'SYMBOL_TABLE'
+            }
+        }
+    }
+}
+
+flutter {
+    source = "../.."
+}
+
+dependencies {
+    // ❌ FlutterFire 플러터 패키지들이 내부에서 관리하므로 직접 자바 의존성 추가하지 마세요.
+    // implementation 'com.google.firebase:firebase-auth:22.3.1'  // ← 삭제
+}
