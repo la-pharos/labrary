@@ -224,6 +224,13 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final viewPaddingBottom = MediaQuery.of(context).padding.bottom;
+
+    // 얘가 핵심:
+    // 소프트키 있는 구형 안드로이드면 padding.bottom이 보통 24~34 이상까지 커.
+    // 제스처 네비 / 에뮬레이터면 0~8 정도로 아주 작음.
+    // 그래서 작은 값은 0으로 날려서 '띄어 보이는' 현상을 없애자.
+    final effectiveBottomInset = viewPaddingBottom >= 16 ? viewPaddingBottom : 0.0;
 
     return Scaffold(
       backgroundColor: const Color(0xFF013328),
@@ -235,18 +242,23 @@ class _MainScreenState extends State<MainScreen> {
           });
         },
         children: [
-          HomeScreen(),
+          const HomeScreen(),
           LibraryScreen(key: _libraryKey),
-          ChallengeScreen(),
-          ChartScreen(),
-          SettingsScreen(),
+          const ChallengeScreen(),
+          const ChartScreen(),
+          const SettingsScreen(),
         ],
       ),
+
+      // ✅ SafeArea 안 쓴다. 우리가 직접 padding 처리
       bottomNavigationBar: Container(
-        padding: const EdgeInsets.symmetric(vertical: 15),
-        decoration: BoxDecoration(
-          color: const Color(0xFF01241c),
-          borderRadius: const BorderRadius.only(
+        padding: EdgeInsets.only(
+          top: 12,
+          bottom: 12 + effectiveBottomInset, // 얘가 상황 따라 늘어남
+        ),
+        decoration: const BoxDecoration(
+          color: Color(0xFF01241c),
+          borderRadius: BorderRadius.only(
             topLeft: Radius.circular(20),
             topRight: Radius.circular(20),
           ),
@@ -266,7 +278,7 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Widget _buildNavItem(IconData icon, int index, {bool isCenter = false}) {
-    bool isSelected = _currentIndex == index;
+    final isSelected = _currentIndex == index;
     return GestureDetector(
       onTap: () => _onItemTapped(index),
       child: Container(

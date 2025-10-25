@@ -347,8 +347,18 @@ class _ReadingIntroScreenState extends State<ReadingIntroScreen> {
   }
 
   Widget _buildBottomNavBar(BuildContext context) {
+    // 디바이스 하단 inset 체크
+    final bottomInset = MediaQuery.of(context).padding.bottom;
+
+    // 삼성 3버튼 내비바처럼 "진짜로 높은 바"만 존중하고,
+    // 픽셀/에뮬레이터의 얇은 제스처 인셋은 무시해서 안 띄우게
+    final effectiveBottomInset = bottomInset >= 16 ? bottomInset : 0.0;
+
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 15),
+      padding: EdgeInsets.only(
+        top: 12,
+        bottom: 12 + effectiveBottomInset,
+      ),
       decoration: const BoxDecoration(
         color: Color(0xFF01241c),
         borderRadius: BorderRadius.only(
