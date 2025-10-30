@@ -19,248 +19,151 @@ class ReadingRunningScreen extends StatefulWidget {
   State<ReadingRunningScreen> createState() => _ReadingRunningScreenState();
 }
 
-class _ReadingRunningScreenState extends State<ReadingRunningScreen> {
+class _ReadingRunningScreenState extends State<ReadingRunningScreen>
+    with WidgetsBindingObserver {
+
   int _countdown = 3;
   bool _showCountdown = true;
-  Timer? _timer;
-  int _seconds = 0;
+
+  // ✅ 벽시계 기반 필드들
+  Timer? _ticker;                       // 화면을 1초마다 다시 그리는 용도(권위 아님)
+  int _seconds = 0;                     // 표시용(항상 계산 결과를 넣음)
   bool _isPaused = false;
-  late DateTime _startTime;
+
+  late DateTime _effectiveStart;        // 카운트다운 종료 직후의 "진짜 시작 시간"
+  Duration _pausedTotal = Duration.zero; // 누적 일시정지 시간
+  DateTime? _pausedAt;                  // 일시정지 시작 시각
+
   bool _isProcessing = false;
 
 
   @override
   void initState() {
     super.initState();
-    _startTime = DateTime.now();
+    WidgetsBinding.instance.addObserver(this);
+
     _startCountdown();
   }
 
   void _startCountdown() {
-    Timer.periodic(const Duration(seconds: 1), (timer) {
+    Timer.periodic(const Duration(seconds: 1), (t) {
       if (_countdown == 1) {
-        timer.cancel();
+        t.cancel();
         setState(() {
           _showCountdown = false;
         });
-        _startTimer();
+        _startSession();
       } else {
-        setState(() {
-          _countdown--;
-        });
+        setState(() => _countdown--);
       }
     });
   }
 
-  void _startTimer() {
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+  // ✅ 세션 시작: 기준시각을 "지금"으로, 일시정지 누적 0으로
+  void _startSession() {
+    _effectiveStart = DateTime.now();
+    _pausedTotal = Duration.zero;
+    _pausedAt = null;
+    _isPaused = false;
+
+    // 1초마다 화면만 갱신(권위는 _recomputeSeconds의 벽시계 계산)
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!_isPaused) {
-        setState(() {
-          _seconds++;
-        });
+        _recomputeSeconds();
+        setState(() {}); // _seconds 반영
       }
     });
+  }
+
+  // ✅ 벽시계 기준으로 경과 초를 재계산
+  void _recomputeSeconds() {
+    final now = DateTime.now();
+    final pausedExtra = (_pausedAt != null)
+        ? now.difference(_pausedAt!)               // 현재도 일시정지 중이면 그 시간까지 포함
+        : Duration.zero;
+
+    final elapsed = now.difference(_effectiveStart)
+        - _pausedTotal
+        - pausedExtra;
+
+    _seconds = elapsed.isNegative ? 0 : elapsed.inSeconds;
   }
 
   void _togglePause() {
-    setState(() {
-      _isPaused = !_isPaused;
-    });
+    final now = DateTime.now();
+
+    if (_isPaused) {
+      // ▶️ 재개: 방금까지의 정지시간을 누적
+      if (_pausedAt != null) {
+        _pausedTotal += now.difference(_pausedAt!);
+        _pausedAt = null;
+      }
+      _isPaused = false;
+      _recomputeSeconds();
+      setState(() {});
+    } else {
+      // ⏸️ 일시정지 시작
+      _recomputeSeconds(); // 정지 직전까지 초를 확정
+      _pausedAt = now;
+      _isPaused = true;
+      setState(() {});
+    }
   }
 
-  void _stopTimer() async {
+  Future<void> _stopTimer() async {
     setState(() => _isProcessing = true);
 
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1B2C2E),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text(
-          "독서를 마치시겠어요?",
-          style: TextStyle(
-            fontFamily: 'kopub',
-            fontWeight: FontWeight.bold,
-            fontSize: 18,
-            color: Colors.white,
+      builder: (context) =>
+          AlertDialog(
+            backgroundColor: const Color(0xFF1B2C2E),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16)),
+            title: const Text("독서를 마치시겠어요?",
+                style: TextStyle(fontFamily: 'kopub',
+                    fontWeight: FontWeight.bold,
+                    fontSize: 18,
+                    color: Colors.white)),
+            content: const Text("지금까지의 시간을 저장합니다.\n단, 1분 이상 독서해야 기록이 저장됩니다.",
+                style: TextStyle(fontFamily: 'kopub',
+                    fontSize: 15,
+                    height: 1.4,
+                    color: Colors.white70)),
+            actions: [
+              TextButton(onPressed: () => Navigator.of(context).pop(true),
+                  child: const Text("확인", style: TextStyle(fontFamily: 'kopub',
+                      fontWeight: FontWeight.bold,
+                      color: Colors.amberAccent))),
+              TextButton(onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text("취소", style: TextStyle(fontFamily: 'kopub',
+                      fontWeight: FontWeight.bold,
+                      color: Colors.redAccent))),
+            ],
           ),
-        ),
-        content: const Text(
-          "지금까지의 시간을 저장합니다.\n단, 1분 이상 독서해야 기록이 저장됩니다.",
-          style: TextStyle(
-            fontFamily: 'kopub',
-            fontSize: 15,
-            height: 1.4,
-            color: Colors.white70,
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text(
-              "확인",
-              style: TextStyle(
-                fontFamily: 'kopub',
-                fontWeight: FontWeight.bold,
-                color: Colors.amberAccent,
-              ),
-            ),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text(
-              "취소",
-              style: TextStyle(
-                fontFamily: 'kopub',
-                fontWeight: FontWeight.bold,
-                color: Colors.redAccent,
-              ),
-            ),
-          ),
-        ],
-      ),
     );
 
     if (confirmed != true) {
-      setState(() => _isProcessing = false); // ✅ 취소 시 로딩 해제
+      setState(() => _isProcessing = false);
       return;
     }
 
-    _timer?.cancel();
+    _ticker?.cancel();
+
+    // ✅ 종료 직전에 최종 재계산(정확한 경과 보장)
+    _recomputeSeconds();
     final endTime = DateTime.now();
     final durationMinutes = (_seconds / 60).round();
 
     if (_seconds < 60) {
-      setState(() => _isProcessing = false); // ✅ 해제
+      setState(() => _isProcessing = false);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("⏱ 1분 이상 독서해야 기록이 저장됩니다."),
-          backgroundColor: Colors.redAccent,
-          duration: Duration(seconds: 2),
-        ),
+        const SnackBar(content: Text("⏱ 1분 이상 독서해야 기록이 저장됩니다."),
+            backgroundColor: Colors.redAccent, duration: Duration(seconds: 2)),
       );
       Navigator.of(context).pop();
       return;
-    }
-
-    // ✅ 페이지 입력 다이얼로그 실행
-    final result = await showDialog<Map<String, dynamic>>(
-      context: context,
-      builder: (context) => PageInputDialog(
-        totalPages: widget.book.pageCount,
-        initialPage: widget.book.pageRead,
-      ),
-    );
-
-    if (result == null) {
-      setState(() => _isProcessing = false); // ✅ 해제
-      return;
-    }
-
-    final int? pageRead = result['page'] as int?;
-    final bool isDone = result['done'] as bool;
-    final String newCategory = isDone ? "done" : "reading";
-
-    try {
-      final booksProvider = Provider.of<SavedBooksProvider>(context, listen: false);
-
-      // ✅ 타이머 로그 저장
-      await ReadingLogService.saveTimerLog(
-        bookId: widget.book.id,
-        title: widget.book.title,
-        startTime: _startTime,
-        endTime: endTime,
-        durationMinutes: durationMinutes,
-      );
-
-      if (!mounted) return;
-
-      // ✅ 책 정보 업데이트
-      await booksProvider.addOrUpdateBook(
-        widget.book.copyWith(
-          category: newCategory,
-          startDate: widget.book.startDate ?? _startTime,
-          endDate: isDone ? DateTime.now() : null,
-          readDate: isDone ? DateTime.now() : null,
-          pageRead: pageRead ?? widget.book.pageRead,
-        ),
-      );
-
-      // ✅ 챌린지 상태 리프레시
-      final challengeProvider = Provider.of<ChallengeProvider>(context, listen: false);
-      final savedBooks = booksProvider.savedBooks;
-      final userId = FirebaseAuth.instance.currentUser?.uid ?? '';
-      await challengeProvider.refreshAllStatuses(
-        savedBooks: savedBooks,
-        userId: userId,
-      );
-
-      if (!mounted) return;
-
-      setState(() => _isProcessing = false); // ✅ 모든 작업 끝 → 로딩 해제
-
-      // ✅ 축하 다이얼로그
-      await showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) {
-          Future.delayed(const Duration(milliseconds: 1500), () {
-            if (Navigator.of(ctx).canPop()) Navigator.of(ctx).pop();
-          });
-
-          return AlertDialog(
-            backgroundColor: Colors.greenAccent,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            content: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 150),
-              child: IntrinsicWidth(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: const [
-                    Text("✨", style: TextStyle(fontSize: 36)),
-                    SizedBox(height: 12),
-                    Text(
-                      "오늘도 독서 성공!\n꾸준함이 빛을 만듭니다 💪",
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontFamily: 'Kopub',
-                        fontWeight: FontWeight.w600,
-                        fontSize: 18,
-                      ),
-                    ),
-                    SizedBox(height: 8),
-                    Text("응원합니다 🌟", textAlign: TextAlign.center),
-                  ],
-                ),
-              ),
-            ),
-          );
-        },
-      );
-
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("✅ 독서 기록이 저장되었습니다."),
-          backgroundColor: Colors.green,
-          duration: Duration(seconds: 2),
-        ),
-      );
-
-      Navigator.of(context).pop(true);
-    } catch (e, stack) {
-      debugPrint('[❌ ERROR] Reading Timer 종료 중 예외 발생: $e');
-      debugPrintStack(stackTrace: stack);
-      if (mounted) {
-        setState(() => _isProcessing = false); // ✅ 실패 시도 로딩 해제
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("오류가 발생했습니다: $e"),
-            backgroundColor: Colors.redAccent,
-          ),
-        );
-      }
     }
   }
 
@@ -323,16 +226,27 @@ class _ReadingRunningScreenState extends State<ReadingRunningScreen> {
   }
 
   String _formatTime(int seconds) {
-    final Duration d = Duration(seconds: seconds);
-    return d.inMinutes.remainder(60).toString().padLeft(2, '0') +
-        ":" +
-        d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    final d = Duration(seconds: seconds);
+    final mm = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final ss = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return "$mm:$ss";
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    _ticker?.cancel();
     super.dispose();
+  }
+
+  // ✅ 앱 라이프사이클 변화 시 표시값을 즉시 보정
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 앱이 복귀했을 때 즉시 재계산해 반영
+    if (state == AppLifecycleState.resumed && !_showCountdown) {
+      _recomputeSeconds();
+      setState(() {});
+    }
   }
 
   @override

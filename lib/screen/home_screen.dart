@@ -112,7 +112,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-              SizedBox(height: h * 0.03),
+              SizedBox(height: h * 0.02),
 
               // 타이틀
               Text(
@@ -139,7 +139,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-              SizedBox(height: h * 0.03),
+              SizedBox(height: h * 0.025),
 
               // 버튼1
               _buildHomeButton(

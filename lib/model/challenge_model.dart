@@ -6,7 +6,7 @@ import 'package:dayverse_book/model/book_model.dart';
 /// ✅ 챌린지 유형 (단일형 / 스테이지형)
 enum ChallengeStageType { single, staged }
 
-/// ✅ 챌린지 카테고리 (루틴형 / 성장형)
+/// ✅ 챌린지 카테고리 (루틴형 / 성장형)  ← 기존 의미 유지
 enum ChallengeCategory { routine, growth }
 
 /// ✅ 도전 방식: 지정 횟수 / 지정 도서 / 지정 권수
@@ -20,6 +20,40 @@ enum ChallengeCheckMode { manual, auto }
 
 /// ✅ 지정 도서 방식: 운영자 / 사용자 지정
 enum SpecificBookMode { systemDefined, userDefined }
+
+/// ✅ 새로 추가: 콘텐츠 주제(도메인) 분류용
+///    - UI 필터/탭, 추천 섹션 등에 사용
+enum ChallengeTheme {
+  habit,       // 루틴/습관
+  selfGrowth,  // 자기계발
+  study,       // 학습/자격/시험
+  language,    // 언어
+  career,      // 커리어/비즈니스
+  society,     // 사회/인문/문화
+  hobby,       // 취미/예술/여행
+  philosophy,  // 철학
+  mind,        // 정신
+  etc,
+}
+
+ChallengeTheme? _parseThemeNullable(dynamic raw) {
+  if (raw == null) return null;
+  final key = raw.toString().trim().toLowerCase()
+      .replaceAll(' ', '').replaceAll('-', '').replaceAll('_', '');
+
+  const map = {
+    'habit'      : ChallengeTheme.habit,
+    'selfgrowth' : ChallengeTheme.selfGrowth,
+    'study'      : ChallengeTheme.study,
+    'language'   : ChallengeTheme.language,
+    'career'     : ChallengeTheme.career,
+    'society'    : ChallengeTheme.society,
+    'hobby'      : ChallengeTheme.hobby,
+    'philosophy' : ChallengeTheme.philosophy,
+    'etc'        : ChallengeTheme.etc,
+  };
+  return map[key]; // 매칭 안되면 null
+}
 
 class Challenge {
   final String id;
@@ -36,6 +70,9 @@ class Challenge {
   final ChallengeMethod method;
   final ChallengePeriod period;
   final ChallengeCheckMode checkMode;
+
+  /// ✅ 새 필드: 주제(도메인) 분류
+  final ChallengeTheme? theme;
 
   final List<int>? durationOptions;
   final List<int>? checkCountOptions;
@@ -83,6 +120,9 @@ class Challenge {
     required this.method,
     required this.period,
     required this.checkMode,
+
+    this.theme,
+
     this.durationOptions,
     this.checkCountOptions,
     this.startDate,
@@ -110,6 +150,7 @@ class Challenge {
   }) : id = id ?? const Uuid().v4();
 
   factory Challenge.fromMap(Map<String, dynamic> map) {
+
     return Challenge(
       id: map['id'],
       title: map['title'],
@@ -123,6 +164,9 @@ class Challenge {
       method: ChallengeMethod.values.firstWhere((e) => e.name == map['method']),
       period: ChallengePeriod.values.firstWhere((e) => e.name == map['period']),
       checkMode: ChallengeCheckMode.values.firstWhere((e) => e.name == map['checkMode']),
+
+      theme: _parseThemeNullable(map['theme']),  // ← 이렇게
+
       durationOptions: map['durationOptions'] != null ? List<int>.from(map['durationOptions']) : null,
       checkCountOptions: map['checkCountOptions'] != null ? List<int>.from(map['checkCountOptions']) : null,
       startDate: map['startDate'] != null ? DateTime.parse(map['startDate']).toLocal() : null,
@@ -177,6 +221,9 @@ class Challenge {
       'method': method.name,
       'period': period.name,
       'checkMode': checkMode.name,
+
+      if (theme != null) 'theme': theme!.name, // ✅ 있을 때만 직렬화
+
       'durationOptions': durationOptions,
       'checkCountOptions': checkCountOptions,
       'startDate': startDate?.toIso8601String(),
@@ -217,6 +264,7 @@ class Challenge {
     ChallengeMethod? method,
     ChallengePeriod? period,
     ChallengeCheckMode? checkMode,
+    ChallengeTheme? theme,
     List<int>? durationOptions,
     List<int>? checkCountOptions,
     DateTime? startDate,
@@ -228,8 +276,6 @@ class Challenge {
     List<BookModel>? requiredBooks,
     List<BookModel>? participatingBooks,
     String? imageUrl,
-    String? badgeImage,
-    String? rewardTitle,
     String? goalDisplayText,
     String? periodDisplayText,
     bool? isCustom,
@@ -257,6 +303,7 @@ class Challenge {
       method: method ?? this.method,
       period: period ?? this.period,
       checkMode: checkMode ?? this.checkMode,
+      theme: theme ?? this.theme, // ✅ nullable 유지
       durationOptions: durationOptions ?? this.durationOptions,
       checkCountOptions: checkCountOptions ?? this.checkCountOptions,
       startDate: startDate ?? this.startDate,

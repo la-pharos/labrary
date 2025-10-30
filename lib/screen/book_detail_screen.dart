@@ -150,7 +150,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
               _buildReadingStatusSection(book, screenWidth),
               SizedBox(height: screenWidth * 0.03),
               _buildMemoSection(context),
-              SizedBox(height: screenWidth * 0.1),
+              SizedBox(height: screenWidth * 0.2),
             ],
           ),
         ),

@@ -405,7 +405,7 @@ class _ChallengeCreateScreenState extends State<ChallengeCreateScreen> {
                                   const SizedBox(width: 16),
                                   const Expanded(
                                     child: Text(
-                                      "챌린지 이미지를 등록해보세요 (선택)",
+                                      "대표 이미지를 등록해보세요 (선택)",
                                       style: TextStyle(color: Colors.white70, fontFamily: 'kopub'),
                                     ),
                                   ),

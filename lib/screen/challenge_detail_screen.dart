@@ -118,7 +118,7 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
                   if (widget.challenge.goalDescription != null)
                     DescriptionCard(
                       title: "🎯 챌린지 목표",
-                      content: widget.challenge.goalDescription!,
+                      content: widget.challenge.goalDisplayText!,
                     ),
                   if (widget.challenge.recommendedFor != null)
                     DescriptionCard(

@@ -31,7 +31,7 @@ class ChallengeCard extends StatelessWidget {
     final latestChallenge = context.watch<ChallengeProvider>().findChallengeById(challenge.id) ?? challenge;
     final completedCount = latestChallenge.attempts.where((a) => a.completed).length;
     final completedStages = completedCount;
-    final totalStages = latestChallenge.stageDurations?.length ?? 1;
+    final totalStages = latestChallenge.stageDurations.length; // 기본 0이면 1로 보이고 싶으면 max(1, ...) 처리
     final isStageBased = latestChallenge.stageType == ChallengeStageType.staged;
     final showRepeatBadge = showAttemptsBadge && latestChallenge.isRepeatable && completedCount > 0;
 
@@ -169,6 +169,8 @@ class ChallengeScreen extends StatefulWidget {
 
 class _ChallengeScreenState extends State<ChallengeScreen> {
 
+  ChallengeTheme? _selectedTheme;
+
   @override
   void initState() {
     super.initState();
@@ -185,12 +187,36 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
+    final screenWidth  = MediaQuery.of(context).size.width;
     final screenHeight = MediaQuery.of(context).size.height;
 
     final challengeProvider = context.watch<ChallengeProvider>();
-    final joinedChallenges = challengeProvider.joinedChallenges;
-    final notJoinedChallenges = challengeProvider.notJoinedChallenges;
+
+    // 진행/미참여/완료 목록
+    final joined      = challengeProvider.joinedChallenges;
+    final notJoined   = challengeProvider.notJoinedChallenges;
+    final completed   = challengeProvider.completedChallenges; // 없으면 Provider에 추가 or []로 대체
+
+    // ✅ 칩 후보는 "전체 챌린지"에서 theme가 있는 것만 모음
+    final List<Challenge> all = [
+      ...joined,
+      ...notJoined,
+      ...completed,
+    ];
+
+    // ✅ 칩 목록
+    final availableThemes = [
+      ...joined, ...notJoined, ...completed,
+    ].map((c) => c.theme)
+        .whereType<ChallengeTheme>()   // null 제거
+        .toSet()
+        .toList()
+      ..sort((a, b) => a.index.compareTo(b.index));
+
+    // ✅ 실제 리스트는 "참여 가능(notJoined)" + 선택 테마 필터
+    final filteredNotJoined = _selectedTheme == null
+        ? notJoined
+        : notJoined.where((c) => c.theme == _selectedTheme).toList();
 
     return Scaffold(
       backgroundColor: const Color(0xFF013328),
@@ -217,11 +243,11 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
                           fontWeight: FontWeight.bold,
                           color: Colors.white)),
                   SizedBox(height: screenHeight * 0.015),
-                  if (joinedChallenges.isEmpty)
+                  if (joined.isEmpty)
                     _buildPlaceholderBox("진행 중인 챌린지가 없습니다.", screenWidth)
                   else
                     Column(
-                      children: joinedChallenges.map((c) => GestureDetector(
+                      children: joined.map((c) => GestureDetector(
                         onTap: () {
                           Navigator.push(context, MaterialPageRoute(
                               builder: (_) => ChallengeOngoingScreen(challenge: c)));
@@ -265,16 +291,26 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
                           fontFamily: 'kopub',
                           fontWeight: FontWeight.bold,
                           color: Colors.white)),
+                  SizedBox(height: screenHeight * 0.012),
+
+                  // ⬇️ 테마 칩들
+                  _buildThemeChips(screenWidth, availableThemes),
+
                   SizedBox(height: screenHeight * 0.015),
-                  Column(
-                    children: notJoinedChallenges.map((c) => GestureDetector(
-                      onTap: () {
-                        Navigator.push(context, MaterialPageRoute(
-                            builder: (_) => ChallengeDetailScreen(challenge: c)));
-                      },
-                      child: ChallengeCard(challenge: c, showAttemptsBadge: true),
-                    )).toList(),
-                  ),
+
+                  // ⬇️ 필터링된 리스트
+                  if (filteredNotJoined.isEmpty)
+                    _buildPlaceholderBox("해당 테마의 챌린지가 없습니다.", screenWidth)
+                  else
+                    Column(
+                      children: filteredNotJoined.map((c) => GestureDetector(
+                        onTap: () {
+                          Navigator.push(context,
+                              MaterialPageRoute(builder: (_) => ChallengeDetailScreen(challenge: c)));
+                        },
+                        child: ChallengeCard(challenge: c, showAttemptsBadge: true),
+                      )).toList(),
+                    ),
                   SizedBox(height: screenHeight * 0.05),
                 ],
               ),
@@ -336,6 +372,103 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
               ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  String _themeLabel(ChallengeTheme t) {
+    switch (t) {
+      case ChallengeTheme.habit:       return '습관';
+      case ChallengeTheme.selfGrowth:  return '자기개발';
+      case ChallengeTheme.study:       return '학습';
+      case ChallengeTheme.language:    return '언어';
+      case ChallengeTheme.career:      return '커리어';
+      case ChallengeTheme.society:     return '사회';
+      case ChallengeTheme.hobby:       return '취미';
+      case ChallengeTheme.philosophy:  return '철학';
+      case ChallengeTheme.mind:  return '정신';
+      case ChallengeTheme.etc:         return '기타';
+    }
+  }
+
+  IconData _themeIcon(ChallengeTheme t) {
+    switch (t) {
+      case ChallengeTheme.habit:       return Icons.local_fire_department; // 🔥
+      case ChallengeTheme.selfGrowth:  return Icons.trending_up;           // 🌱
+      case ChallengeTheme.study:       return Icons.menu_book;             // 📚
+      case ChallengeTheme.language:    return Icons.record_voice_over;     // 🗣️
+      case ChallengeTheme.career:      return Icons.work;                  // 💼
+      case ChallengeTheme.society:     return Icons.account_balance;       // 🏛️
+      case ChallengeTheme.hobby:       return Icons.palette;               // 🎨
+      case ChallengeTheme.philosophy:  return Icons.psychology_alt;        // 🤔
+      case ChallengeTheme.mind:  return Icons.psychology_sharp;        // 🤔
+      case ChallengeTheme.etc:         return Icons.add_rounded;              // 📌
+    }
+  }
+
+  Widget _buildThemeChips(double screenWidth, List<ChallengeTheme> availableThemes) {
+    final unselectedBg = Color(0xFF013328).withOpacity(0.7);
+    final unselectedBorder = Color(0xFF013328).withOpacity(0.4);
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          // 전체 칩
+          Padding(
+            padding: EdgeInsets.only(right: screenWidth * 0.02),
+            child: ChoiceChip(
+              selected: _selectedTheme == null,
+              showCheckmark: false,
+              label: const Text('전체'),
+              avatar: const Icon(Icons.apps_rounded, size: 20, color: Colors.black),
+              onSelected: (_) => setState(() => _selectedTheme = null),
+
+              // ✅ 스타일
+              selectedColor: Colors.amberAccent,          // 선택된 칩 배경
+              backgroundColor: unselectedBg,               // 비선택 배경
+              side: BorderSide(color: unselectedBorder),   // 얇은 보더 유지
+              labelStyle: const TextStyle(
+                color: Colors.black,                       // 항상 검정 텍스트
+                fontFamily: 'kopub',
+                fontWeight: FontWeight.w700,
+                fontSize: 14,
+                letterSpacing: 0.2,
+              ),
+              shape: const StadiumBorder(),
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+          ),
+
+          // 사용 가능한 테마 칩들
+          ...availableThemes.map((t) {
+            final selected = _selectedTheme == t;
+            return Padding(
+              padding: EdgeInsets.only(right: screenWidth * 0.02),
+              child: ChoiceChip(
+                selected: selected,
+                showCheckmark: false,
+                label: Text(_themeLabel(t)),
+                avatar: Icon(_themeIcon(t), size: 20, color: Colors.black),
+                onSelected: (_) => setState(() => _selectedTheme = t),
+
+                // ✅ 스타일
+                selectedColor: Colors.amberAccent,
+                backgroundColor: unselectedBg,
+                side: BorderSide(color: unselectedBorder),
+                labelStyle: const TextStyle(
+                  color: Colors.black,                     // 항상 검정 텍스트
+                  fontFamily: 'kopub',
+                  fontWeight: FontWeight.w700,
+                  fontSize: 14,
+                  letterSpacing: 0.2,
+                ),
+                shape: const StadiumBorder(),
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            );
+          }),
         ],
       ),
     );

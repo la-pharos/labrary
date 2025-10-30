@@ -87,7 +87,7 @@ class _BookRegisterScreenState extends State<BookRegisterScreen> {
               _buildBox(_buildInfoSection(screenWidth), screenWidth),
               SizedBox(height: verticalSpacing),
               _buildBox(_buildRegisterSection(screenWidth), screenWidth),
-              SizedBox(height: screenHeight * 0.05),
+              SizedBox(height: screenHeight * 0.1),
               //buildAdSection( context,  screenHeight)
             ],
           ),
@@ -525,7 +525,6 @@ class _BookRegisterScreenState extends State<BookRegisterScreen> {
       ),
     );
   }
-
 
   void _saveBook() async {
     final provider = Provider.of<SavedBooksProvider>(context, listen: false);

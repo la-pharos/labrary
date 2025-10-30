@@ -225,7 +225,7 @@ class _BookSearchScreenState extends State<BookSearchScreen> {
             ),
           );
         }
-        return _buildBookList(_searchResults, provider, screenWidth);
+        return _buildBookList(context, _searchResults, provider, screenWidth);
 
       case SearchState.idle:
       default:
@@ -257,8 +257,8 @@ class _BookSearchScreenState extends State<BookSearchScreen> {
               ),
             ),
             SizedBox(
-              height: screenHeight * 0.73, // ⬅️ 높이는 상황에 맞게 조정 가능
-              child: _buildBookList(_bestsellers, provider, screenWidth, showRank: true),
+              height: screenHeight * 1.2, // ⬅️ 높이는 상황에 맞게 조정 가능
+              child: _buildBookList(context, _bestsellers, provider, screenWidth, showRank: true),
             ),
 
           ],
@@ -267,22 +267,26 @@ class _BookSearchScreenState extends State<BookSearchScreen> {
   }
 
   Widget _buildBookList(
+      BuildContext context,
       List<BookModel> books,
       SavedBooksProvider provider,
       double screenWidth, {
         bool showRank = false,
+        double bottomExtra = 0,
       }) {
+    final screenHeight = MediaQuery.of(context).size.height;
+    final adHeight = screenHeight * 0.08;
+
     return ListView.builder(
-      padding: EdgeInsets.only(bottom: screenWidth * 0.1), // ✅ 하단 여백 추가
+      // 🔧 핵심 수정
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+
+      padding: EdgeInsets.only(bottom: adHeight + bottomExtra + 24),
       itemCount: books.length + 1,
       itemBuilder: (context, index) {
         if (index == books.length) {
-          return Padding(
-            padding: EdgeInsets.symmetric(vertical: screenWidth * 0.05),
-            child: const Center(
-              child: Text("", style: TextStyle(color: Colors.white60)),
-            ),
-          );
+          return SizedBox(height: screenHeight * 0.02);
         }
 
         final book = books[index];
