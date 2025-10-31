@@ -22,7 +22,6 @@ enum ChallengeCheckMode { manual, auto }
 enum SpecificBookMode { systemDefined, userDefined }
 
 /// ✅ 새로 추가: 콘텐츠 주제(도메인) 분류용
-///    - UI 필터/탭, 추천 섹션 등에 사용
 enum ChallengeTheme {
   habit,       // 루틴/습관
   selfGrowth,  // 자기계발
@@ -32,6 +31,7 @@ enum ChallengeTheme {
   society,     // 사회/인문/문화
   hobby,       // 취미/예술/여행
   philosophy,  // 철학
+  literature,  // 문학
   mind,        // 정신
   etc,
 }
@@ -50,6 +50,7 @@ ChallengeTheme? _parseThemeNullable(dynamic raw) {
     'society'    : ChallengeTheme.society,
     'hobby'      : ChallengeTheme.hobby,
     'philosophy' : ChallengeTheme.philosophy,
+    'literature' : ChallengeTheme.literature,
     'etc'        : ChallengeTheme.etc,
   };
   return map[key]; // 매칭 안되면 null
@@ -64,6 +65,7 @@ class Challenge {
   final String? goalDescription;
   final String? recommendedFor;
   final String? guideText;
+  final String? requiredBooksPoolId;
 
   final ChallengeStageType stageType;
   final ChallengeCategory category;
@@ -115,6 +117,7 @@ class Challenge {
     this.goalDescription,
     this.recommendedFor,
     this.guideText,
+    this.requiredBooksPoolId, // ✅ 추가
     required this.stageType,
     required this.category,
     required this.method,
@@ -177,6 +180,8 @@ class Challenge {
       specificBookMode: map['specificBookMode'] != null
           ? SpecificBookMode.values.firstWhere((e) => e.name == map['specificBookMode'])
           : null,
+      requiredBooksPoolId: map['requiredBooksPoolId'],
+      // 기존 requiredBooks는 그대로 둠(뒤호환)
       requiredBooks: map['requiredBooks'] != null
           ? (map['requiredBooks'] as List)
           .map((e) => BookModel.fromMap(Map<String, dynamic>.from(e)))
@@ -232,6 +237,7 @@ class Challenge {
       'requiredMinutes': requiredMinutes,
       'requiredPages': requiredPages,
       'specificBookMode': specificBookMode?.name,
+      'requiredBooksPoolId': requiredBooksPoolId,
       'requiredBooks': requiredBooks?.map((b) => b.toMap()).toList(),
       'participatingBooks': participatingBooks?.map((b) => b.toMap()).toList(),
       'imageUrl': imageUrl,
@@ -259,6 +265,7 @@ class Challenge {
     String? goalDescription,
     String? recommendedFor,
     String? guideText,
+    String? requiredBooksPoolId, // ✅ 추가
     ChallengeStageType? stageType,
     ChallengeCategory? category,
     ChallengeMethod? method,
@@ -298,6 +305,7 @@ class Challenge {
       goalDescription: goalDescription ?? this.goalDescription,
       recommendedFor: recommendedFor ?? this.recommendedFor,
       guideText: guideText ?? this.guideText,
+      requiredBooksPoolId: requiredBooksPoolId ?? this.requiredBooksPoolId, // ✅
       stageType: stageType ?? this.stageType,
       category: category ?? this.category,
       method: method ?? this.method,

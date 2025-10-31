@@ -387,6 +387,7 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
       case ChallengeTheme.society:     return '사회';
       case ChallengeTheme.hobby:       return '취미';
       case ChallengeTheme.philosophy:  return '철학';
+      case ChallengeTheme.literature:  return '문학';
       case ChallengeTheme.mind:  return '정신';
       case ChallengeTheme.etc:         return '기타';
     }
@@ -402,6 +403,7 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
       case ChallengeTheme.society:     return Icons.account_balance;       // 🏛️
       case ChallengeTheme.hobby:       return Icons.palette;               // 🎨
       case ChallengeTheme.philosophy:  return Icons.psychology_alt;        // 🤔
+      case ChallengeTheme.literature:  return Icons.collections_bookmark_outlined;        // 🤔
       case ChallengeTheme.mind:  return Icons.psychology_sharp;        // 🤔
       case ChallengeTheme.etc:         return Icons.add_rounded;              // 📌
     }

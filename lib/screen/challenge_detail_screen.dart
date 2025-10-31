@@ -16,6 +16,8 @@ import 'package:dayverse_book/widget/challenge/book_search_selection_box.dart';
 import 'package:dayverse_book/widget/challenge/summary_card.dart';
 import 'package:dayverse_book/widget/challenge/description_card.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:dayverse_book/utils/book_pool_loader.dart'; // ✅ 추가
+
 
 
 class ChallengeDetailScreen extends StatefulWidget {
@@ -37,12 +39,40 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
   }
 
   Future<void> _loadRequiredBookDetails() async {
-    final books = widget.challenge.requiredBooks ?? [];
-    final result = await BookApiService.fetchRequiredBooksFromApi(books);
-    if (!mounted) return; // ✅ 위젯이 여전히 살아있는지 확인
-    setState(() {
-      detailedRequiredBooks = result;
-    });
+    try {
+      List<String> isbns = [];
+
+      // 1️⃣ 풀 참조가 있으면 ISBN 목록 로드
+      if (widget.challenge.requiredBooksPoolId != null) {
+        isbns = await loadIsbnsFromPool(widget.challenge.requiredBooksPoolId!);
+      }
+
+      // 2️⃣ 없거나 비어있다면 (구버전 호환) 기존 requiredBooks에서 ISBN 추출
+      if (isbns.isEmpty && widget.challenge.requiredBooks != null) {
+        isbns = widget.challenge.requiredBooks!
+            .map((b) => (b.isbn ?? '').trim())
+            .where((x) => x.isNotEmpty)
+            .toList();
+      }
+
+      // 3️⃣ ISBN이 있으면 ISBN 기반 API로 상세 조회
+      if (isbns.isNotEmpty) {
+        final result = await BookApiService.fetchBooksByIsbnList(isbns);
+        if (!mounted) return;
+        setState(() => detailedRequiredBooks = result);
+        return;
+      }
+
+      // 4️⃣ ISBN도 없으면(드물지만) 구-로직 fallback (제목/저자 기반)
+      final baseBooks = widget.challenge.requiredBooks ?? [];
+      if (baseBooks.isNotEmpty) {
+        final result = await BookApiService.fetchRequiredBooksFromApi(baseBooks);
+        if (!mounted) return;
+        setState(() => detailedRequiredBooks = result);
+      }
+    } catch (e) {
+      debugPrint('⚠️ _loadRequiredBookDetails error: $e');
+    }
   }
 
   @override
@@ -397,6 +427,8 @@ class _ChallengeParticipationDialogState extends State<ChallengeParticipationDia
   List<BookModel> selectedBooks = [];
   final TextEditingController searchController = TextEditingController();
   bool _isJoining = false;
+  List<BookModel> detailedRequiredBooks = [];
+
 
 
   @override
@@ -410,6 +442,32 @@ class _ChallengeParticipationDialogState extends State<ChallengeParticipationDia
       selectedDuration = c.durationOptions!.first;
     } else if (c.checkCountOptions?.isNotEmpty == true) {
       selectedDuration = c.checkCountOptions!.first;
+    }
+
+    // ✅ 시스템 지정 도서가 있으면 불러오기
+    if (c.method == ChallengeMethod.specificBooks &&
+        c.specificBookMode == SpecificBookMode.systemDefined) {
+      _loadBooksFromPoolAndApi();
+    }
+  }
+
+  Future<void> _loadBooksFromPoolAndApi() async {
+    try {
+      List<String> isbns = [];
+
+      // 1️⃣ 풀 JSON에서 ISBN 리스트 불러오기
+      if (widget.challenge.requiredBooksPoolId != null) {
+        isbns = await loadIsbnsFromPool(widget.challenge.requiredBooksPoolId!);
+      }
+
+      // 2️⃣ ISBN 기반으로 알라딘 API 조회
+      if (isbns.isNotEmpty) {
+        final result = await BookApiService.fetchBooksByIsbnList(isbns);
+        if (!mounted) return;
+        setState(() => detailedRequiredBooks = result);
+      }
+    } catch (e) {
+      debugPrint('⚠️ _loadBooksFromPoolAndApi error: $e');
     }
   }
 
@@ -926,6 +984,7 @@ class _ChallengeParticipationDialogState extends State<ChallengeParticipationDia
 
     final challenge = widget.challenge;
 
+    // ✅ 사용자 지정 도서 선택형
     if (allowsUserBookSelection) {
       return Padding(
         padding: EdgeInsets.symmetric(vertical: screenWidth * 0.01),
@@ -940,12 +999,13 @@ class _ChallengeParticipationDialogState extends State<ChallengeParticipationDia
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text("🔸도서 선택",
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: titleFontSize,
-                      fontWeight: FontWeight.bold,
-                    fontFamily: 'kopub',
-                  ),),
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: titleFontSize,
+                  fontWeight: FontWeight.bold,
+                  fontFamily: 'kopub',
+                ),
+              ),
               SizedBox(height: screenWidth * 0.025),
               BookSearchSelectionBox(
                 initialSelectedBook: selectedBooks.isNotEmpty ? selectedBooks.first : null,
@@ -959,7 +1019,10 @@ class _ChallengeParticipationDialogState extends State<ChallengeParticipationDia
           ),
         ),
       );
-    } else if (challenge.method == ChallengeMethod.specificBooks &&
+    }
+
+    // ✅ 시스템 지정 도서형 (book pool + ISBN 기반)
+    else if (challenge.method == ChallengeMethod.specificBooks &&
         challenge.specificBookMode == SpecificBookMode.systemDefined) {
       return Padding(
         padding: EdgeInsets.symmetric(vertical: screenWidth * 0.02),
@@ -977,46 +1040,80 @@ class _ChallengeParticipationDialogState extends State<ChallengeParticipationDia
                   style: TextStyle(
                       color: Colors.white,
                       fontSize: titleFontSize,
-                      fontWeight: FontWeight.bold)),
+                      fontWeight: FontWeight.bold,
+                      fontFamily: 'kopub')),
               SizedBox(height: screenWidth * 0.03),
-              ...(challenge.requiredBooks ?? []).map((book) => Container(
-                margin: EdgeInsets.only(bottom: screenWidth * 0.02),
-                padding: EdgeInsets.all(screenWidth * 0.02),
-                decoration: BoxDecoration(
-                  color: Colors.white12,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  children: [
-                    if (book.imageUrl != null)
-                      Image.network(book.imageUrl!, width: imageWidth, height: imageHeight, fit: BoxFit.cover),
-                    SizedBox(width: screenWidth * 0.03),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(book.title,
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: bookFontSize)),
-                          Text(book.author,
-                              style: TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: infoFontSize)),
-                        ],
+
+              // ✅ 로딩 중
+              if (_isJoining && detailedRequiredBooks.isEmpty)
+                const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(16.0),
+                    child: CircularProgressIndicator(color: Colors.amberAccent),
+                  ),
+                )
+
+              // ✅ 도서 목록 출력
+              else if (detailedRequiredBooks.isNotEmpty)
+                ...detailedRequiredBooks.map((book) => Container(
+                  margin: EdgeInsets.only(bottom: screenWidth * 0.02),
+                  padding: EdgeInsets.all(screenWidth * 0.02),
+                  decoration: BoxDecoration(
+                    color: Colors.white12,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      if (book.imageUrl != null && book.imageUrl!.isNotEmpty)
+                        Image.network(
+                          book.imageUrl!,
+                          width: imageWidth,
+                          height: imageHeight,
+                          fit: BoxFit.cover,
+                        ),
+                      SizedBox(width: screenWidth * 0.03),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(book.title,
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: bookFontSize)),
+                            Text(book.author,
+                                style: TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: infoFontSize)),
+                          ],
+                        ),
                       ),
-                    ),
-                    Text('${book.pageCount}페이지',
-                        style: TextStyle(color: Colors.white70, fontSize: infoFontSize)),
-                  ],
+                      if (book.pageCount > 0)
+                        Text('${book.pageCount}페이지',
+                            style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: infoFontSize)),
+                    ],
+                  ),
+                ))
+
+              // ✅ 아무 책도 없을 때
+              else
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12.0),
+                  child: Text(
+                    "도서 정보를 불러올 수 없습니다.",
+                    style: TextStyle(color: Colors.white70, fontSize: infoFontSize),
+                  ),
                 ),
-              )),
             ],
           ),
         ),
       );
-    } else {
+    }
+
+    // ✅ 기본값
+    else {
       return const SizedBox();
     }
   }

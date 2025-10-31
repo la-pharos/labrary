@@ -272,5 +272,19 @@ class BookApiService {
     return result;
   }
 
+  /// ✅ 여러 ISBN을 한 번에 상세 조회
+  static Future<List<BookModel>> fetchBooksByIsbnList(List<String> isbns) async {
+    final List<BookModel> result = [];
+    for (final isbn in isbns) {
+      try {
+        final book = await fetchBookDetailByIsbn(isbn);
+        if (book != null) result.add(book);
+      } catch (e) {
+        debugPrint('⚠️ ISBN $isbn 조회 실패: $e');
+      }
+    }
+    return result;
+  }
+
 }
 // 📂

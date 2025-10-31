@@ -430,7 +430,7 @@
   {
     "id": "essay_lover",
     "title": "For Essay Lover",
-    "theme": "selfGrowth",
+    "theme": "literature",
     "shortDescription": "에세이 러버를 위한, 30일마다 한 권의 에세이",
     "longDescription": "깊은 울림을 주는 엄선된 에세이 한 권으로 한 달을 채워보세요.\n\n이 챌린지는 120일 동안 총 4권의 세계적인 문학·산문 에세이집을 완독하는 여정입니다. 매월 다른 시선과 통찰을 담은 한 권의 책이 당신의 일상에 잔잔한 변화를 불러올 것입니다.",
     "goalDescription": "매월 한 권, 120일간 총 4권의 에세이를 완독합니다.",
@@ -689,6 +689,56 @@
     "attempts": [],
     "allowedStartTime": null,
     "allowedEndTime": null
-  }
+  },
+  {
+    "id": "snu_challenge_korean_lit",
+    "title": "서울대 권장도서 – 한국문학편",
+    "theme": "literature",
+    "shortDescription": "서울대 권장도서 한국문학편 16권 완독.",
+    "longDescription": "고전부터 근대·현대문학까지, 서울대 권장 한국문학 16권을 1년(365일) 안에 완독하세요. 페이지 진행률을 기반으로 자동 체크됩니다.",
+    "goalDescription": "서울대 권장도서 한국문학편 16권 완독하기",
+    "recommendedFor": "서울대학교에서 권장하는 도서를 읽고 성장하고 싶은신 분",
+    "guideText": "목록에서 읽을 책을 선택하고 독서를 시작하세요. 각 책은 페이지 진행률 100% 시 자동으로 1권 완독으로 집계됩니다. 1년 안에 16권을 모두 완독하면 챌린지가 완료됩니다.",
 
+    "stageType": "single",
+    "category": "growth",
+    "method": "specificBooks",
+    "period": "periodBased",
+    "checkMode": "auto",
+    "checkAction": "pageAuto",
+
+    "durationOptions": [365],
+    "checkCountOptions": [],
+    "startDate": null,
+    "endDate": null,
+
+    "totalBooks": 16,
+    "requiredMinutes": null,
+    "requiredPages": 1,
+    "currentStageIndex": null,
+
+    "specificBookMode": "systemDefined",
+    "forceBookSelection": false,
+
+    "requiredBooksPoolId": "snu_korean_lit",
+    "requiredBooks": [],
+    "participatingBooks": [],
+
+    "imageUrl": "assets/image/snu_challenge_korean.png",
+    "badgeImage": "assets/image/badge_snu_korean.png",
+    "rewardTitle": "SNU Korean Literature Finisher",
+    "goalDisplayText": "서울대 권장도서 한국문학편 완독하기",
+    "periodDisplayText": "1년",
+
+    "isCustom": false,
+    "isPremium": false,
+    "isJoined": false,
+    "isCompleted": false,
+    "isRepeatable": true,
+
+    "stageDurations": [],
+    "attempts": [],
+    "allowedStartTime": null,
+    "allowedEndTime": null
+  }
 ]

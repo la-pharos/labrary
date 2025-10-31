@@ -257,7 +257,7 @@ class _BookSearchScreenState extends State<BookSearchScreen> {
               ),
             ),
             SizedBox(
-              height: screenHeight * 1.2, // ⬅️ 높이는 상황에 맞게 조정 가능
+              height: screenHeight * 1.25, // ⬅️ 높이는 상황에 맞게 조정 가능
               child: _buildBookList(context, _bestsellers, provider, screenWidth, showRank: true),
             ),
 
