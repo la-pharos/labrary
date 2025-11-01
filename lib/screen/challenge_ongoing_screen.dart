@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'dart:convert';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:dayverse_book/main.dart';
+import 'package:flutter/services.dart';
 import 'package:dayverse_book/model/challenge_model.dart';
 import 'package:dayverse_book/model/book_model.dart';
 import 'package:dayverse_book/provider/challenge_provider.dart';
@@ -16,6 +18,8 @@ import 'package:dayverse_book/widget/challenge/action_button.dart';
 import 'package:dayverse_book/widget/challenge/completion_dialog.dart';
 import 'package:dayverse_book/utils/challenge_check_utils.dart';
 import 'package:dayverse_book/utils/challenge_progress_utils.dart';
+import 'package:dayverse_book/utils/book_pool_loader.dart';
+import 'package:dayverse_book/service/book_api_service.dart'; // ✅ BookApiService
 import 'challenge_done_screen.dart';
 
 
@@ -33,6 +37,76 @@ class _ChallengeOngoingScreenState extends State<ChallengeOngoingScreen> {
   Map<String, dynamic> _recordWithBooks = {};
   bool _hasCheckedCompletion = false;
 
+  // ✅ 추가: 풀 기반 상세도서 / 로딩 표시
+  bool _isLoadingPoolBooks = false;
+  List<BookModel> _poolBooks = [];
+
+  // ✅ 공통: 화면에서 보여줄 타겟 도서 결정
+  List<BookModel> get _displayTargetBooks {
+    if (_poolBooks.isNotEmpty) return _poolBooks;
+    if ((_currentChallenge.participatingBooks ?? []).isNotEmpty) {
+      return _currentChallenge.participatingBooks!;
+    }
+    return _currentChallenge.requiredBooks ?? const [];
+  }
+
+
+  Future<void> _loadPoolBooksIfNeeded() async {
+    final c = _currentChallenge;
+
+    final isSystemDefinedPool =
+        c.method == ChallengeMethod.specificBooks &&
+            c.specificBookMode == SpecificBookMode.systemDefined &&
+            (c.requiredBooksPoolId?.isNotEmpty ?? false);
+
+    if (!isSystemDefinedPool) return;
+    if (_poolBooks.isNotEmpty) return;
+
+    try {
+      setState(() => _isLoadingPoolBooks = true);
+
+      // 1) 풀 엔트리 → ISBN 리스트 추출
+      final entries = await BookPoolLoader.loadPoolEntries(c.requiredBooksPoolId!);
+      final isbns = entries
+          .map((e) => (e.isbn ?? e.isbn13 ?? '').trim())
+          .where((s) => s.isNotEmpty)
+          .toList();
+
+      // 2) ISBN 있으면 상세 API, 없거나 실패하면 최소 표시용(BookPoolLoader→BookModel)
+      List<BookModel> hydrated = [];
+      if (isbns.isNotEmpty) {
+        final fetched = await BookApiService.fetchBooksByIsbnList(isbns);
+
+        // id/isbn 표준화(빈 값 보정)
+        hydrated = fetched.map((b) {
+          final newId   = (b.id.isNotEmpty) ? b.id : (b.isbn ?? '');
+          final newIsbn = (b.isbn?.isNotEmpty == true) ? b.isbn! : newId;
+          return b.copyWith(id: newId, isbn: newIsbn);
+        }).toList();
+      }
+      if (hydrated.isEmpty) {
+        hydrated = await BookPoolLoader.loadPoolAsBookModels(c.requiredBooksPoolId!);
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _poolBooks = hydrated;
+
+        // ⚠️ 핵심: 한 번만 하이드레이션해서 기존 위젯/유틸이 requiredBooks를 그대로 쓰도록
+        _currentChallenge = _currentChallenge.copyWith(
+          requiredBooks: (_currentChallenge.requiredBooks?.isNotEmpty ?? false)
+              ? _currentChallenge.requiredBooks
+              : hydrated,
+        );
+      });
+    } catch (e) {
+      debugPrint('⚠️ _loadPoolBooksIfNeeded error: $e');
+    } finally {
+      if (mounted) setState(() => _isLoadingPoolBooks = false);
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -40,6 +114,7 @@ class _ChallengeOngoingScreenState extends State<ChallengeOngoingScreen> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _refreshChallengeState();
+      await _loadPoolBooksIfNeeded(); // ✅ 추가: 풀 기반 도서 로드
 
       if (!_hasCheckedCompletion) {
         _hasCheckedCompletion = true;
@@ -147,6 +222,7 @@ class _ChallengeOngoingScreenState extends State<ChallengeOngoingScreen> {
                     challenge: _currentChallenge,
                     savedBooks: savedBooks,
                     record: _recordWithBooks,
+                    targetBooksOverride: _displayTargetBooks, // ✅ 추가
                   ),
                   SizedBox(height: spacing),
                   if (_currentChallenge.category == ChallengeCategory.routine &&
@@ -161,11 +237,14 @@ class _ChallengeOngoingScreenState extends State<ChallengeOngoingScreen> {
                       return ReadingBookSection(
                         challenge: _currentChallenge,
                         savedBooks: savedBooksProvider.savedBooks,
+                        booksOverride: _displayTargetBooks, // ✅ 추가
                       );
                     },
                   ),
-                  ReadDoneSection(challenge: _currentChallenge),
-                  SizedBox(height: spacing),
+                  ReadDoneSection(
+                    challenge: _currentChallenge,
+                    booksOverride: _displayTargetBooks, // ✅ 추가
+                  ),                  SizedBox(height: spacing),
                   const Divider(color: Colors.white24),
                   SizedBox(height: spacing),
                   SummaryCard(challenge: _currentChallenge),
@@ -176,6 +255,7 @@ class _ChallengeOngoingScreenState extends State<ChallengeOngoingScreen> {
             ActionButton(
               challenge: _currentChallenge,
               record: _recordWithBooks,
+              targetBooksOverride: _displayTargetBooks, // ✅ 한 줄만 추가
             ),
           ],
         ),
@@ -270,8 +350,16 @@ class _ChallengeOngoingScreenState extends State<ChallengeOngoingScreen> {
       };
     });
 
-    final completed = ChallengeProgressUtils.isChallengeCompleted(refreshed, _recordWithBooks);
-    final failed = ChallengeProgressUtils.isChallengeFailed(refreshed, _recordWithBooks);
+    final completed = ChallengeProgressUtils.isChallengeCompleted(
+      refreshed,
+      _recordWithBooks,
+      targetBooksOverride: _displayTargetBooks, // 🔹 풀 반영
+    );
+    final failed = ChallengeProgressUtils.isChallengeFailed(
+      refreshed,
+      _recordWithBooks,
+      targetBooksOverride: _displayTargetBooks, // 🔹 풀 반영
+    );
 
     if (completed) {
       await provider.markChallengeAsCompleted(refreshed.id, userId);

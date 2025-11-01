@@ -16,11 +16,13 @@ import 'package:flutter/cupertino.dart';
 class ReadingIntroScreen extends StatefulWidget {
   final Challenge? challenge;       // ✅ 챌린지 정보
   final BookModel? initialBook;     // ✅ 초기 도서
+  final List<BookModel>? candidateBooksOverride;
 
   const ReadingIntroScreen({
     super.key,
     this.challenge,
     this.initialBook,
+    this.candidateBooksOverride, // ✅ 추가
   });
 
   @override
@@ -53,11 +55,18 @@ class _ReadingIntroScreenState extends State<ReadingIntroScreen> {
         getChallengeCheckActionType(challenge) == ChallengeCheckActionType.pageAuto;
 
     if (isAdminDefinedPageAuto && mounted && selectedBook == null) {
-      final books = challenge!.requiredBooks ?? [];
+      // ✅ override > challenge.requiredBooks 순서로 후보 결정
+      final List<BookModel> candidates =
+      (widget.candidateBooksOverride != null && widget.candidateBooksOverride!.isNotEmpty)
+          ? widget.candidateBooksOverride!
+          : (challenge!.requiredBooks ?? const <BookModel>[]);
+
+      if (candidates.isEmpty) return; // 풀 로드 실패 등 예외 시 조용히 종료(필요시 스낵바 넣어도 OK)
+
       final selected = await showDialog<BookModel>(
         context: context,
         builder: (_) => DefinedBookSelection(
-          books: challenge.requiredBooks ?? [],
+          books: candidates, // ✅ 여기만 변경
           savedBooks: context.read<SavedBooksProvider>().savedBooks,
         ),
       );

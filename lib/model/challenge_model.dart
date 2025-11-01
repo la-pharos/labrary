@@ -32,28 +32,9 @@ enum ChallengeTheme {
   hobby,       // 취미/예술/여행
   philosophy,  // 철학
   literature,  // 문학
+  science_tech,// 과학기술
   mind,        // 정신
   etc,
-}
-
-ChallengeTheme? _parseThemeNullable(dynamic raw) {
-  if (raw == null) return null;
-  final key = raw.toString().trim().toLowerCase()
-      .replaceAll(' ', '').replaceAll('-', '').replaceAll('_', '');
-
-  const map = {
-    'habit'      : ChallengeTheme.habit,
-    'selfgrowth' : ChallengeTheme.selfGrowth,
-    'study'      : ChallengeTheme.study,
-    'language'   : ChallengeTheme.language,
-    'career'     : ChallengeTheme.career,
-    'society'    : ChallengeTheme.society,
-    'hobby'      : ChallengeTheme.hobby,
-    'philosophy' : ChallengeTheme.philosophy,
-    'literature' : ChallengeTheme.literature,
-    'etc'        : ChallengeTheme.etc,
-  };
-  return map[key]; // 매칭 안되면 null
 }
 
 class Challenge {
@@ -168,7 +149,12 @@ class Challenge {
       period: ChallengePeriod.values.firstWhere((e) => e.name == map['period']),
       checkMode: ChallengeCheckMode.values.firstWhere((e) => e.name == map['checkMode']),
 
-      theme: _parseThemeNullable(map['theme']),  // ← 이렇게
+      theme: map['theme'] != null
+          ? ChallengeTheme.values.firstWhere(
+            (e) => e.name == map['theme'],
+        orElse: () => ChallengeTheme.etc,
+      )
+          : null,
 
       durationOptions: map['durationOptions'] != null ? List<int>.from(map['durationOptions']) : null,
       checkCountOptions: map['checkCountOptions'] != null ? List<int>.from(map['checkCountOptions']) : null,

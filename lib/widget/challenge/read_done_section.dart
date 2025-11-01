@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:dayverse_book/model/book_model.dart';
 import 'package:dayverse_book/model/challenge_model.dart';
 import 'package:dayverse_book/provider/saved_books_provider.dart';
 
@@ -7,12 +8,14 @@ class ReadDoneSection extends StatefulWidget {
   final Challenge challenge;
   final bool isDoneMode;
   final List<String>? completedBookIds;
+  final List<BookModel>? booksOverride; // ✅ 실제 필드로 반영
 
   const ReadDoneSection({
     super.key,
     required this.challenge,
     this.isDoneMode = false,
     this.completedBookIds,
+    this.booksOverride, // ✅
   });
 
   @override
@@ -21,6 +24,25 @@ class ReadDoneSection extends StatefulWidget {
 
 class _ReadDoneSectionState extends State<ReadDoneSection> {
   bool _isExpanded = false;
+
+  // ✅ id > isbn 기준 키 통일
+  String? _keyForBook(BookModel b) {
+    if (b.id.isNotEmpty) return b.id;
+    final isbn = b.isbn;
+    if (isbn != null && isbn.isNotEmpty) return isbn;
+    return null;
+  }
+
+  // ✅ 타겟 도서 해석 (override > participating > required)
+  List<BookModel> _resolveTargetBooks() {
+    if (widget.booksOverride != null && widget.booksOverride!.isNotEmpty) {
+      return widget.booksOverride!;
+    }
+    if ((widget.challenge.participatingBooks ?? []).isNotEmpty) {
+      return widget.challenge.participatingBooks!;
+    }
+    return widget.challenge.requiredBooks ?? const <BookModel>[];
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -42,7 +64,6 @@ class _ReadDoneSectionState extends State<ReadDoneSection> {
     if (attempt == null) return const SizedBox.shrink();
 
     // ✅ 2) 기간 계산 보정
-    // 우선 challenge-level 기간 사용, 없으면 attempt 기반으로 계산
     DateTime? start = widget.challenge.startDate?.toLocal();
     DateTime? end   = widget.challenge.endDate?.toLocal();
 
@@ -56,33 +77,43 @@ class _ReadDoneSectionState extends State<ReadDoneSection> {
       }
     }
     if (start == null || end == null) {
-      // 기간 산출 불가하면 노출하지 않음
       return const SizedBox.shrink();
     }
 
     final savedBooks = context.read<SavedBooksProvider>().savedBooks;
 
-    final booksToShow = widget.isDoneMode
+    // ✅ 3) 타겟 키셋 준비(풀/참여/필수 도서로 제한) — 없으면 전체 허용
+    final targets = _resolveTargetBooks();
+    final targetKeys = targets.map(_keyForBook).whereType<String>().toSet();
+    final hasTargetFilter = targetKeys.isNotEmpty;
+
+    // ✅ 4) 표시할 책 id 목록 산출
+    final booksToShowIds = widget.isDoneMode
         ? (widget.completedBookIds ?? attempt.completedBookIds)
         : savedBooks
         .where((book) {
       final completedAt = book.endDate?.toLocal();
-      return book.category == 'done' &&
+      final inPeriod = book.category == 'done' &&
           completedAt != null &&
           !completedAt.isBefore(start!) &&
           !completedAt.isAfter(end!);
+
+      if (!inPeriod) return false;
+
+      // 타겟 제한(있을 때만) 적용: id>isbn 키 기준
+      if (!hasTargetFilter) return true;
+      final k = _keyForBook(book);
+      return k != null && targetKeys.contains(k);
     })
         .map((b) => b.id)
         .toList();
 
     final completedBooksInPeriod =
-    savedBooks.where((b) => booksToShow.contains(b.id)).toList();
+    savedBooks.where((b) => booksToShowIds.contains(b.id)).toList();
 
-    // ✅ 3) 문자열 보간 버그 fix
-    final sectionTitle = "🔸 도전기간 내 읽은 책"
-        "${completedBooksInPeriod.isNotEmpty ? " (${completedBooksInPeriod.length}권)" : ""}";
-    // 위처럼 따로 쓰면 에러가 날 수 있어 한 줄로 합치는 게 안전
-    // final sectionTitle = "🔸 도전기간 내 읽은 책${completedBooksInPeriod.isNotEmpty ? " (${completedBooksInPeriod.length}권)" : ""}";
+    // ✅ 5) 안전한 문자열 보간
+    final sectionTitle =
+        "🔸 도전기간 내 읽은 책${completedBooksInPeriod.isNotEmpty ? " (${completedBooksInPeriod.length}권)" : ""}";
 
     final isOverflow = completedBooksInPeriod.length > 6;
     final booksToDisplay = _isExpanded || !isOverflow
@@ -113,7 +144,9 @@ class _ReadDoneSectionState extends State<ReadDoneSection> {
           Container(
             width: screenWidth,
             padding: EdgeInsets.symmetric(
-                horizontal: sectionSpacing, vertical: sectionSpacing * 1.2),
+              horizontal: sectionSpacing,
+              vertical: sectionSpacing * 1.2,
+            ),
             margin: EdgeInsets.only(bottom: sectionSpacing),
             decoration: BoxDecoration(
               color: Colors.white10,

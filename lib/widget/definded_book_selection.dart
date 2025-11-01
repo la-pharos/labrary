@@ -110,7 +110,7 @@ class DefinedBookSelection extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              color: Colors.white70,
+                              color: isDone ? Colors.greenAccent : Colors.white,
                               fontSize: smallFontSize,
                               fontFamily: 'kopub',
                             ),

@@ -40,35 +40,58 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
 
   Future<void> _loadRequiredBookDetails() async {
     try {
-      List<String> isbns = [];
+      // 1) 풀 기반이면: 풀에서 ISBN 추출 시도
+      if (widget.challenge.requiredBooksPoolId != null &&
+          widget.challenge.requiredBooksPoolId!.isNotEmpty) {
 
-      // 1️⃣ 풀 참조가 있으면 ISBN 목록 로드
-      if (widget.challenge.requiredBooksPoolId != null) {
-        isbns = await loadIsbnsFromPool(widget.challenge.requiredBooksPoolId!);
+        // (a) 풀 엔트리 로드 → ISBN 목록 만들기
+        final entries = await BookPoolLoader.loadPoolEntries(widget.challenge.requiredBooksPoolId!);
+        final isbnsFromPool = entries
+            .map((e) => (e.isbn ?? e.isbn13 ?? '').trim())
+            .where((s) => s.isNotEmpty)
+            .toList();
+
+        // (b) ISBN이 있으면 API 상세 조회 우선
+        if (isbnsFromPool.isNotEmpty) {
+          final result = await BookApiService.fetchBooksByIsbnList(isbnsFromPool);
+          if (mounted && result.isNotEmpty) {
+            setState(() => detailedRequiredBooks = result);
+            return;
+          }
+        }
+
+        // (c) ISBN이 없거나 API 결과가 비어도, 최소 표시용으로 풀→BookModel 하이드레이션
+        final fallback = await BookPoolLoader.loadPoolAsBookModels(widget.challenge.requiredBooksPoolId!);
+        if (mounted && fallback.isNotEmpty) {
+          setState(() => detailedRequiredBooks = fallback);
+          return;
+        }
+        // 여기까지 비면 아래 구버전 fallback로 진행
       }
 
-      // 2️⃣ 없거나 비어있다면 (구버전 호환) 기존 requiredBooks에서 ISBN 추출
-      if (isbns.isEmpty && widget.challenge.requiredBooks != null) {
+      // 2) 풀이 없거나 비었으면: 기존 requiredBooks에서 ISBN 추출
+      List<String> isbns = [];
+      if (widget.challenge.requiredBooks != null && widget.challenge.requiredBooks!.isNotEmpty) {
         isbns = widget.challenge.requiredBooks!
             .map((b) => (b.isbn ?? '').trim())
             .where((x) => x.isNotEmpty)
             .toList();
       }
 
-      // 3️⃣ ISBN이 있으면 ISBN 기반 API로 상세 조회
+      // 3) ISBN이 있으면 ISBN 기반 API 상세 조회
       if (isbns.isNotEmpty) {
         final result = await BookApiService.fetchBooksByIsbnList(isbns);
-        if (!mounted) return;
-        setState(() => detailedRequiredBooks = result);
-        return;
+        if (mounted && result.isNotEmpty) {
+          setState(() => detailedRequiredBooks = result);
+          return;
+        }
       }
 
-      // 4️⃣ ISBN도 없으면(드물지만) 구-로직 fallback (제목/저자 기반)
+      // 4) ISBN도 없으면(제목/저자 기반) 구 로직 fallback
       final baseBooks = widget.challenge.requiredBooks ?? [];
       if (baseBooks.isNotEmpty) {
         final result = await BookApiService.fetchRequiredBooksFromApi(baseBooks);
-        if (!mounted) return;
-        setState(() => detailedRequiredBooks = result);
+        if (mounted) setState(() => detailedRequiredBooks = result);
       }
     } catch (e) {
       debugPrint('⚠️ _loadRequiredBookDetails error: $e');
@@ -427,6 +450,7 @@ class _ChallengeParticipationDialogState extends State<ChallengeParticipationDia
   List<BookModel> selectedBooks = [];
   final TextEditingController searchController = TextEditingController();
   bool _isJoining = false;
+  bool _isLoadingBooks = false;            // ← 목록 로딩 상태
   List<BookModel> detailedRequiredBooks = [];
 
 
@@ -444,30 +468,64 @@ class _ChallengeParticipationDialogState extends State<ChallengeParticipationDia
       selectedDuration = c.checkCountOptions!.first;
     }
 
-    // ✅ 시스템 지정 도서가 있으면 불러오기
+    // 시스템 지정 도서면 목록 미리 가져오기 (풀/구버전 모두 커버)
     if (c.method == ChallengeMethod.specificBooks &&
         c.specificBookMode == SpecificBookMode.systemDefined) {
-      _loadBooksFromPoolAndApi();
+      _loadBooksForSystemDefined();
     }
   }
 
-  Future<void> _loadBooksFromPoolAndApi() async {
+  Future<void> _loadBooksForSystemDefined() async {
     try {
-      List<String> isbns = [];
+      setState(() => _isLoadingBooks = true);
 
-      // 1️⃣ 풀 JSON에서 ISBN 리스트 불러오기
-      if (widget.challenge.requiredBooksPoolId != null) {
-        isbns = await loadIsbnsFromPool(widget.challenge.requiredBooksPoolId!);
+      // 1) 풀 기반: ISBN 있으면 상세 API, 없거나 실패하면 풀→BookModel로 표시
+      if ((widget.challenge.requiredBooksPoolId ?? '').isNotEmpty) {
+        final entries = await BookPoolLoader.loadPoolEntries(widget.challenge.requiredBooksPoolId!);
+        final isbns = entries
+            .map((e) => (e.isbn ?? e.isbn13 ?? '').trim())
+            .where((s) => s.isNotEmpty)
+            .toList();
+
+        if (isbns.isNotEmpty) {
+          final result = await BookApiService.fetchBooksByIsbnList(isbns);
+          if (mounted && result.isNotEmpty) {
+            setState(() {
+              detailedRequiredBooks = result;
+              _isLoadingBooks = false;
+            });
+            return;
+          }
+        }
+
+        // ISBN 기반 상세가 비었을 때 최소 표시용
+        final fallback = await BookPoolLoader.loadPoolAsBookModels(widget.challenge.requiredBooksPoolId!);
+        if (mounted) {
+          setState(() {
+            detailedRequiredBooks = fallback;
+            _isLoadingBooks = false;
+          });
+        }
+        return;
       }
 
-      // 2️⃣ ISBN 기반으로 알라딘 API 조회
-      if (isbns.isNotEmpty) {
-        final result = await BookApiService.fetchBooksByIsbnList(isbns);
-        if (!mounted) return;
-        setState(() => detailedRequiredBooks = result);
+      // 2) 구버전(풀 없음): requiredBooks 기반
+      final base = widget.challenge.requiredBooks ?? const <BookModel>[];
+      if (base.isNotEmpty) {
+        final result = await BookApiService.fetchRequiredBooksFromApi(base);
+        if (mounted) {
+          setState(() {
+            detailedRequiredBooks = result;
+            _isLoadingBooks = false;
+          });
+        }
+        return;
       }
+
+      if (mounted) setState(() => _isLoadingBooks = false);
     } catch (e) {
-      debugPrint('⚠️ _loadBooksFromPoolAndApi error: $e');
+      debugPrint('⚠️ _loadBooksForSystemDefined error: $e');
+      if (mounted) setState(() => _isLoadingBooks = false);
     }
   }
 
@@ -552,16 +610,50 @@ class _ChallengeParticipationDialogState extends State<ChallengeParticipationDia
         }
       } else if (challenge.method == ChallengeMethod.specificBooks &&
           challenge.specificBookMode == SpecificBookMode.systemDefined) {
-        final fetchedBooks = await BookApiService.fetchRequiredBooksFromApi(challenge.requiredBooks ?? []);
-        for (final book in fetchedBooks) {
-          booksToJoin.add(book);
+
+        // 1) 다이얼로그에서 이미 로드했다면 그걸 우선 사용
+        List<BookModel> sourceBooks = List<BookModel>.from(detailedRequiredBooks);
+
+        // 2) 비어 있으면: 풀 → ISBN 상세 → 실패 시 풀→BookModel 최소세트
+        if (sourceBooks.isEmpty) {
+          if ((challenge.requiredBooksPoolId ?? '').isNotEmpty) {
+            final entries = await BookPoolLoader.loadPoolEntries(challenge.requiredBooksPoolId!);
+            final isbns = entries
+                .map((e) => (e.isbn ?? e.isbn13 ?? '').trim())
+                .where((s) => s.isNotEmpty)
+                .toList();
+
+            if (isbns.isNotEmpty) {
+              sourceBooks = await BookApiService.fetchBooksByIsbnList(isbns);
+            }
+            if (sourceBooks.isEmpty) {
+              sourceBooks = await BookPoolLoader.loadPoolAsBookModels(challenge.requiredBooksPoolId!);
+            }
+          }
+
+          // 최종 fallback: 구버전 requiredBooks → API
+          if (sourceBooks.isEmpty) {
+            sourceBooks = await BookApiService.fetchRequiredBooksFromApi(challenge.requiredBooks ?? []);
+          }
+        }
+
+        // 3) 사용자 서재 등록
+        for (final book in sourceBooks) {
+          // 페이지 수 미상일 때 itemId가 있으면 한 번 더 상세 보강
+          BookModel updated = book;
+          if (updated.pageCount == 0 && (updated.itemId?.isNotEmpty ?? false)) {
+            final fetched = await BookApiService.fetchBookDetail(updated.itemId!);
+            if (fetched != null && fetched.pageCount > 0) {
+              updated = updated.copyWith(pageCount: fetched.pageCount);
+            }
+          }
+
+          booksToJoin.add(updated);
           await savedBooksProvider.addOrUpdateBook(
-            book.copyWith(
+            updated.copyWith(
               category: 'reading',
               startDate: startDate,
-              pageRead: (book.pageRead > 0 && book.pageRead < (book.pageCount))
-                  ? book.pageRead
-                  : 1,
+              pageRead: (updated.pageRead > 0 && updated.pageRead < updated.pageCount) ? updated.pageRead : 1,
             ),
           );
         }
@@ -976,11 +1068,11 @@ class _ChallengeParticipationDialogState extends State<ChallengeParticipationDia
 
   Widget _buildBookSection(double screenWidth) {
     final titleFontSize = screenWidth * 0.04;
-    final bookFontSize = screenWidth * 0.03;
-    final infoFontSize = screenWidth * 0.03;
-    final boxPadding = screenWidth * 0.03;
-    final imageWidth = screenWidth * 0.14;
-    final imageHeight = imageWidth * 1.4;
+    final bookFontSize  = screenWidth * 0.03;
+    final infoFontSize  = screenWidth * 0.03;
+    final boxPadding    = screenWidth * 0.03;
+    final imageWidth    = screenWidth * 0.14;
+    final imageHeight   = imageWidth * 1.4;
 
     final challenge = widget.challenge;
 
@@ -991,29 +1083,16 @@ class _ChallengeParticipationDialogState extends State<ChallengeParticipationDia
         child: Container(
           width: double.infinity,
           padding: EdgeInsets.all(boxPadding),
-          decoration: BoxDecoration(
-            color: Colors.white10,
-            borderRadius: BorderRadius.circular(16),
-          ),
+          decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(16)),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text("🔸도서 선택",
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: titleFontSize,
-                  fontWeight: FontWeight.bold,
-                  fontFamily: 'kopub',
-                ),
-              ),
+                  style: TextStyle(color: Colors.white, fontSize: titleFontSize, fontWeight: FontWeight.bold, fontFamily: 'kopub')),
               SizedBox(height: screenWidth * 0.025),
               BookSearchSelectionBox(
                 initialSelectedBook: selectedBooks.isNotEmpty ? selectedBooks.first : null,
-                onBookChanged: (book) {
-                  setState(() {
-                    selectedBooks = book != null ? [book] : [];
-                  });
-                },
+                onBookChanged: (book) => setState(() => selectedBooks = book != null ? [book] : []),
               ),
             ],
           ),
@@ -1021,90 +1100,39 @@ class _ChallengeParticipationDialogState extends State<ChallengeParticipationDia
       );
     }
 
-    // ✅ 시스템 지정 도서형 (book pool + ISBN 기반)
-    else if (challenge.method == ChallengeMethod.specificBooks &&
+    // ✅ 시스템 지정 도서형 (book pool 또는 구버전 requiredBooks)
+    if (challenge.method == ChallengeMethod.specificBooks &&
         challenge.specificBookMode == SpecificBookMode.systemDefined) {
+      final books = _effectiveSystemBooks();
+
       return Padding(
         padding: EdgeInsets.symmetric(vertical: screenWidth * 0.02),
         child: Container(
           width: double.infinity,
           padding: EdgeInsets.all(boxPadding),
-          decoration: BoxDecoration(
-            color: Colors.white10,
-            borderRadius: BorderRadius.circular(16),
-          ),
+          decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(16)),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text("🔸읽을 책 목록",
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: titleFontSize,
-                      fontWeight: FontWeight.bold,
-                      fontFamily: 'kopub')),
+                  style: TextStyle(color: Colors.white, fontSize: titleFontSize, fontWeight: FontWeight.bold, fontFamily: 'kopub')),
               SizedBox(height: screenWidth * 0.03),
 
-              // ✅ 로딩 중
-              if (_isJoining && detailedRequiredBooks.isEmpty)
-                const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(16.0),
-                    child: CircularProgressIndicator(color: Colors.amberAccent),
-                  ),
-                )
-
-              // ✅ 도서 목록 출력
-              else if (detailedRequiredBooks.isNotEmpty)
-                ...detailedRequiredBooks.map((book) => Container(
-                  margin: EdgeInsets.only(bottom: screenWidth * 0.02),
-                  padding: EdgeInsets.all(screenWidth * 0.02),
-                  decoration: BoxDecoration(
-                    color: Colors.white12,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    children: [
-                      if (book.imageUrl != null && book.imageUrl!.isNotEmpty)
-                        Image.network(
-                          book.imageUrl!,
-                          width: imageWidth,
-                          height: imageHeight,
-                          fit: BoxFit.cover,
-                        ),
-                      SizedBox(width: screenWidth * 0.03),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(book.title,
-                                style: TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: bookFontSize)),
-                            Text(book.author,
-                                style: TextStyle(
-                                    color: Colors.white70,
-                                    fontSize: infoFontSize)),
-                          ],
-                        ),
-                      ),
-                      if (book.pageCount > 0)
-                        Text('${book.pageCount}페이지',
-                            style: TextStyle(
-                                color: Colors.white70,
-                                fontSize: infoFontSize)),
-                    ],
-                  ),
+              // 🔄 로딩 중
+              if (_isLoadingBooks)
+                const Center(child: Padding(
+                  padding: EdgeInsets.all(16.0),
+                  child: CircularProgressIndicator(color: Colors.amberAccent),
                 ))
-
-              // ✅ 아무 책도 없을 때
+              // 📚 목록
+              else if (books.isNotEmpty)
+                ...books.map((b) => _bookRow(b, screenWidth, imageWidth, imageHeight, bookFontSize, infoFontSize))
+              // ❗비었을 때
               else
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 12.0),
-                  child: Text(
-                    "도서 정보를 불러올 수 없습니다.",
-                    style: TextStyle(color: Colors.white70, fontSize: infoFontSize),
-                  ),
+                  child: Text("도서 정보를 불러올 수 없습니다.",
+                      style: TextStyle(color: Colors.white70, fontSize: infoFontSize)),
                 ),
             ],
           ),
@@ -1112,10 +1140,38 @@ class _ChallengeParticipationDialogState extends State<ChallengeParticipationDia
       );
     }
 
-    // ✅ 기본값
-    else {
-      return const SizedBox();
-    }
+    // 기본값
+    return const SizedBox();
+  }
+
+  // detailedRequiredBooks가 비면 구버전 requiredBooks라도 돌려주기
+  List<BookModel> _effectiveSystemBooks() {
+    if (detailedRequiredBooks.isNotEmpty) return detailedRequiredBooks;
+    // 풀 로딩 전이라면 표시할 게 없을 수 있음 → 기존 requiredBooks로 폴백
+    return widget.challenge.requiredBooks ?? const [];
+  }
+
+  Widget _bookRow(BookModel book, double screenWidth, double imageWidth, double imageHeight, double bookFontSize, double infoFontSize) {
+    return Container(
+      margin: EdgeInsets.only(bottom: screenWidth * 0.02),
+      padding: EdgeInsets.all(screenWidth * 0.02),
+      decoration: BoxDecoration(color: Colors.white12, borderRadius: BorderRadius.circular(8)),
+      child: Row(
+        children: [
+          if ((book.imageUrl ?? '').isNotEmpty)
+            Image.network(book.imageUrl!, width: imageWidth, height: imageHeight, fit: BoxFit.cover),
+          SizedBox(width: screenWidth * 0.03),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(book.title, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: bookFontSize)),
+              Text(book.author, style: TextStyle(color: Colors.white70, fontSize: infoFontSize)),
+            ]),
+          ),
+          if (book.pageCount > 0)
+            Text('${book.pageCount}페이지', style: TextStyle(color: Colors.white70, fontSize: infoFontSize)),
+        ],
+      ),
+    );
   }
 
   Widget _buildJoinButton(double screenWidth) {

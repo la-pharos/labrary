@@ -15,6 +15,8 @@ import 'package:dayverse_book/widget/challenge/description_card.dart';
 import 'package:dayverse_book/widget/challenge/reading_book_section.dart';
 import 'package:dayverse_book/widget/challenge/read_done_section.dart';
 import 'package:dayverse_book/widget/challenge/routine_calendar.dart';
+import 'package:dayverse_book/utils/book_pool_loader.dart';
+import 'package:dayverse_book/service/book_api_service.dart'; // fetchBooksByIsbnList
 
 class ChallengeDoneScreen extends StatefulWidget {
   final Challenge challenge;
@@ -29,24 +31,102 @@ class _ChallengeDoneScreenState extends State<ChallengeDoneScreen> {
   bool showDetails = false;
   Map<String, dynamic>? recordData;
 
+  // ✅ 풀 기반 로딩 상태/결과
+  bool _isLoadingPoolBooks = false;
+  List<BookModel> _poolBooks = [];
+
+  // ✅ 화면에서 사용할 '타겟 도서' (override = 풀/참여도서)
+  List<BookModel> get _displayTargetBooks {
+    if (_poolBooks.isNotEmpty) return _poolBooks;
+    if ((widget.challenge.participatingBooks ?? []).isNotEmpty) {
+      return widget.challenge.participatingBooks!;
+    }
+    return widget.challenge.requiredBooks ?? const [];
+  }
+
+
   @override
   void initState() {
     super.initState();
     _loadChallengeRecord();
 
-    // ✅ 스테이지 챌린지이고 다음 스테이지가 남았으면 다이얼로그 표시
+    // ✅ 스테이지 다음단계 안내 기존 로직 그대로 유지
     final challenge = widget.challenge;
     if (challenge.stageDurations != null && challenge.stageDurations!.isNotEmpty) {
       final totalStages = challenge.stageDurations!.length;
       final completedStages = challenge.attempts.where((a) => a.completed).length;
-
-      // 마지막 스테이지가 아닌 경우에만 안내 다이얼로그
       if (completedStages < totalStages) {
-        // Flutter는 initState에서 showDialog 직접 호출 시 오류 날 수 있으므로 다음 프레임으로 넘김
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _showNextStageDialog(challenge);
         });
       }
+    }
+
+    // ✅ 풀 로딩
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadPoolBooksIfNeeded();
+    });
+  }
+
+  Future<void> _loadPoolBooksIfNeeded() async {
+    final c = widget.challenge; // ✅ 여기로 수정
+
+    final usePool = c.method == ChallengeMethod.specificBooks &&
+        c.specificBookMode == SpecificBookMode.systemDefined &&
+        (c.requiredBooksPoolId?.isNotEmpty ?? false);
+
+    if (!usePool) return;
+    if (_poolBooks.isNotEmpty) return;
+
+    try {
+      setState(() => _isLoadingPoolBooks = true);
+
+      // 1) 풀 → BookModel 로드
+      var poolBooks = await BookPoolLoader.loadPoolAsBookModels(c.requiredBooksPoolId!);
+
+      // 2) id/isbn 표준화
+      poolBooks = poolBooks.map((b) {
+        final newId   = b.id.isNotEmpty ? b.id : (b.isbn ?? '');
+        final newIsbn = (b.isbn != null && b.isbn!.isNotEmpty) ? b.isbn! : newId;
+        return b.copyWith(id: newId, isbn: newIsbn);
+      }).toList();
+
+      // 3) (선택) ISBN 메타데이터 보강
+      final isbns = poolBooks
+          .map((b) => b.isbn)
+          .whereType<String>()
+          .where((s) => s.isNotEmpty)
+          .toSet()
+          .toList();
+
+      if (isbns.isNotEmpty) {
+        final fetched = await BookApiService.fetchBooksByIsbnList(isbns);
+        final byIsbn = {
+          for (final f in fetched)
+            if ((f.isbn ?? '').isNotEmpty) f.isbn!: f
+        };
+
+        poolBooks = poolBooks.map((b) {
+          final f = byIsbn[b.isbn];
+          if (f == null) return b;
+          return b.copyWith(
+            title: (f.title.isNotEmpty) ? f.title : b.title,
+            author: (f.author.isNotEmpty) ? f.author : b.author,
+            pageCount: (f.pageCount > 0) ? f.pageCount : b.pageCount,
+            imageUrl: f.imageUrl ?? b.imageUrl,
+            publisher: f.publisher ?? b.publisher,
+            itemId: f.itemId ?? b.itemId,
+            description: f.description ?? b.description,
+          );
+        }).toList();
+      }
+
+      if (!mounted) return;
+      setState(() => _poolBooks = poolBooks);
+    } catch (e) {
+      debugPrint('⚠️ _loadPoolBooksIfNeeded error: $e');
+    } finally {
+      if (mounted) setState(() => _isLoadingPoolBooks = false);
     }
   }
 
@@ -75,8 +155,23 @@ class _ChallengeDoneScreenState extends State<ChallengeDoneScreen> {
     }
 
     final record = recordData!;
-    final completed = ChallengeProgressUtils.getCompletedCount(challenge, record);
-    final total = ChallengeProgressUtils.getTargetCount(challenge, savedBooks);
+    final enrichedRecord = {
+      ...record,
+      'savedBooks': savedBooks,
+    };
+
+    final completed = ChallengeProgressUtils.getCompletedCount(
+      challenge,
+      enrichedRecord,
+      targetBooksOverride: _displayTargetBooks, // ← 풀/참여/필수 도서 반영
+    );
+
+    final total = ChallengeProgressUtils.getTargetCount(
+      challenge,
+      enrichedRecord, // quantityBased/페이지모드에서도 일관성
+      targetBooksOverride: _displayTargetBooks,
+    );
+
 
     return GestureDetector(
       onHorizontalDragUpdate: (details) {
@@ -241,6 +336,7 @@ class _ChallengeDoneScreenState extends State<ChallengeDoneScreen> {
         savedBooks: savedBooks,
         completedBookIds: completedBookIds,
         isDoneMode: true,
+        booksOverride: _displayTargetBooks, // ✅ 풀/참여/필수 도서
       );
     }
 
@@ -250,6 +346,7 @@ class _ChallengeDoneScreenState extends State<ChallengeDoneScreen> {
         challenge: challenge,
         completedBookIds: completedBookIds,
         isDoneMode: true,
+        booksOverride: _displayTargetBooks, // ✅ (타겟 제한이 있을 때 정확도↑)
       );
     }
 
