@@ -84,7 +84,7 @@
   {
     "id": "self_respect_kit",
     "title": "자존감 회복 키트",
-    "theme": "selfgrowth",
+    "theme": "selfGrowth",
     "shortDescription": "자존감을 북돋아줄 책과 함께 잠시 쉬어가요",
     "longDescription": "자존감은 삶의 모든 순간에 영향을 미치는 내면의 중심입니다.\n\n이 챌린지는 국내 최고의 자존감 회복 베스트셀러 3권과 함께 자신을 더 깊이 이해하고, 사랑하고, 지켜내는 힘을 기르도록 도와줍니다.\n\n마음이 무너질 때, 나를 다시 일으켜줄 책들과 함께 해보세요.",
     "goalDescription": "자존감 회복을 위한 3권의 책을 완독하며 자기 자신을 돌아보고 회복합니다.",
@@ -234,6 +234,7 @@
     "guideText": "제시된 책 3권을 완독하고 ‘읽은 책’으로 등록하면 자동으로 체크됩니다.",
     "stageType": "single",
     "category": "growth",
+    "theme": "literature",
     "method": "specificBooks",
     "period": "daysBased",
     "checkMode": "auto",
@@ -276,7 +277,7 @@
     "goalDisplayText": "작가의 대표작 3권을 완독하세요!",
     "periodDisplayText": "90일",
     "isCustom": false,
-    "isPremium": true,
+    "isPremium": false,
     "isJoined": false,
     "isCompleted": false,
     "isRepeatable": false,
@@ -742,6 +743,57 @@
     "allowedEndTime": null
   },
   {
+    "id": "snu_challenge_world_lit",
+    "title": "서울대 권장도서 – 세계문학편",
+    "theme": "literature",
+    "shortDescription": "서울대 권장도서 세계문학편 31권 완독",
+    "longDescription": "호메로스와 셰익스피어부터 도스토예프스키와 카프카에 이르기까지, 서울대 권장이 꼽은 세계문학 고전 31권을 1년(365일) 안에 완독하세요. 페이지 진행률을 기반으로 자동 체크됩니다.",
+    "goalDescription": "서울대 권장도서 중 세계문학편 31권 완독하기",
+    "recommendedFor": "세계 문학 고전을 통해 다양한 시대와 문명을 넘나들며 독서 경험을 확장하고 싶은 분",
+    "guideText": "목록에서 읽을 책을 선택하고 독서를 시작하세요. 각 책은 페이지 진행률 100% 시 자동으로 1권 완독으로 집계됩니다. 1년 안에 31권을 모두 완독하면 챌린지가 완료됩니다.",
+
+    "stageType": "single",
+    "category": "growth",
+    "method": "specificBooks",
+    "period": "periodBased",
+    "checkMode": "auto",
+    "checkAction": "pageAuto",
+
+    "durationOptions": [365],
+    "checkCountOptions": [],
+    "startDate": null,
+    "endDate": null,
+
+    "totalBooks": 31,
+    "requiredMinutes": null,
+    "requiredPages": 1,
+    "currentStageIndex": null,
+
+    "specificBookMode": "systemDefined",
+    "forceBookSelection": false,
+
+    "requiredBooksPoolId": "snu_world_literature",
+    "requiredBooks": [],
+    "participatingBooks": [],
+
+    "imageUrl": "assets/image/snu_challenge_foreign.png",
+    "badgeImage": "assets/image/badge_snu_foreign.png",
+    "rewardTitle": "SNU Foreign Literature Finisher",
+    "goalDisplayText": "서울대 권장도서 세계문학편 완독하기",
+    "periodDisplayText": "1년",
+
+    "isCustom": false,
+    "isPremium": false,
+    "isJoined": false,
+    "isCompleted": false,
+    "isRepeatable": true,
+
+    "stageDurations": [],
+    "attempts": [],
+    "allowedStartTime": null,
+    "allowedEndTime": null
+  },
+  {
     "id": "snu_challenge_science_tech",
     "title": "서울대 권장도서 – 과학기술편",
     "theme": "science_tech",
@@ -786,6 +838,206 @@
     "isJoined": false,
     "isCompleted": false,
     "isRepeatable": true,
+
+    "stageDurations": [],
+    "attempts": [],
+    "allowedStartTime": null,
+    "allowedEndTime": null
+  },
+  {
+    "id": "snu_challenge_eastern_philosophy",
+    "title": "서울대 권장도서 – 동양사상편",
+    "theme": "philosophy",
+    "shortDescription": "서울대 권장도서 동양사상편 14권 완독",
+    "longDescription": "유교·불교·도교부터 인도 철학까지, 서울대 권장이 꼽은 동양사상 고전 14권을 1년(365일) 안에 완독하세요. 페이지 진행률을 기반으로 자동 체크됩니다.",
+    "goalDescription": "서울대 권장도서 중 동양사상편 14권 완독하기",
+    "recommendedFor": "동양 고전과 사상서를 통해 사유의 깊이를 넓히고 싶은 분",
+    "guideText": "목록에서 읽을 책을 선택하고 독서를 시작하세요. 각 책은 페이지 진행률 100% 시 자동으로 1권 완독으로 집계됩니다. 1년 안에 14권을 모두 완독하면 챌린지가 완료됩니다.",
+
+    "stageType": "single",
+    "category": "growth",
+    "method": "specificBooks",
+    "period": "periodBased",
+    "checkMode": "auto",
+    "checkAction": "pageAuto",
+
+    "durationOptions": [365],
+    "checkCountOptions": [],
+    "startDate": null,
+    "endDate": null,
+
+    "totalBooks": 14,
+    "requiredMinutes": null,
+    "requiredPages": 1,
+    "currentStageIndex": null,
+
+    "specificBookMode": "systemDefined",
+    "forceBookSelection": false,
+
+    "requiredBooksPoolId": "snu_eastern_philosophy",
+    "requiredBooks": [],
+    "participatingBooks": [],
+
+    "imageUrl": "assets/image/snu_challenge_eastern.png",
+    "badgeImage": "assets/image/badge_snu_eastern.png",
+    "rewardTitle": "SNU Eastern Philosophy Finisher",
+    "goalDisplayText": "서울대 권장도서 동양사상편 완독하기",
+    "periodDisplayText": "1년",
+
+    "isCustom": false,
+    "isPremium": false,
+    "isJoined": false,
+    "isCompleted": false,
+    "isRepeatable": true,
+
+    "stageDurations": [],
+    "attempts": [],
+    "allowedStartTime": null,
+    "allowedEndTime": null
+  },
+  {
+    "id": "snu_challenge_western_philosophy",
+    "title": "서울대 권장도서 – 서양사상편",
+    "theme": "philosophy",
+    "shortDescription": "서울대 권장도서 서양사상편 27권 완독",
+    "longDescription": "소크라테스·플라톤·아리스토텔레스에서 데카르트·칸트·니체에 이르기까지, 서울대 권장이 꼽은 서양사상 고전 27권을 1년(365일) 안에 완독하세요. 페이지 진행률을 기반으로 자동 체크됩니다.",
+    "goalDescription": "서울대 권장도서 중 서양사상편 27권 완독하기",
+    "recommendedFor": "서양 철학과 사상사를 체계적으로 읽으며 사고의 틀을 확장하고 싶은 분",
+    "guideText": "목록에서 읽을 책을 선택하고 독서를 시작하세요. 각 책은 페이지 진행률 100% 시 자동으로 1권 완독으로 집계됩니다. 1년 안에 27권을 모두 완독하면 챌린지가 완료됩니다.",
+
+    "stageType": "single",
+    "category": "growth",
+    "method": "specificBooks",
+    "period": "periodBased",
+    "checkMode": "auto",
+    "checkAction": "pageAuto",
+
+    "durationOptions": [365],
+    "checkCountOptions": [],
+    "startDate": null,
+    "endDate": null,
+
+    "totalBooks": 27,
+    "requiredMinutes": null,
+    "requiredPages": 1,
+    "currentStageIndex": null,
+
+    "specificBookMode": "systemDefined",
+    "forceBookSelection": false,
+
+    "requiredBooksPoolId": "snu_western_philosophy",
+    "requiredBooks": [],
+    "participatingBooks": [],
+
+    "imageUrl": "assets/image/snu_challenge_western.png",
+    "badgeImage": "assets/image/badge_snu_western.png",
+    "rewardTitle": "SNU Western Philosophy Finisher",
+    "goalDisplayText": "서울대 권장도서 서양사상편 완독하기",
+    "periodDisplayText": "1년",
+
+    "isCustom": false,
+    "isPremium": false,
+    "isJoined": false,
+    "isCompleted": false,
+    "isRepeatable": true,
+
+    "stageDurations": [],
+    "attempts": [],
+    "allowedStartTime": null,
+    "allowedEndTime": null
+  },
+  {
+    "id": "nobel_2025_literature",
+    "title": "2025 노벨문학상 수상 작가 읽기",
+    "shortDescription": "2025 노벨문학상 수상 작가,\n크러스너호르커이 라슬로의 세계를 탐험하세요.",
+    "longDescription": "2025년 노벨문학상을 수상한 헝가리 작가 크러스너호르커이 라슬로(László Krasznahorkai).\n\n그의 작품은 혼돈 속 질서, 절망 속 유머, 파멸과 구원의 경계를 탐색하며 ‘끝없이 이어지는 문장’으로 현대문학의 새로운 장을 열었습니다. 이번 챌린지는 그의 대표작 7권을 통해 인간 존재의 불안과 구원, 그리고 언어의 무한한 가능성을 체험하는 여정입니다.",
+    "goalDescription": "크러스너 라슬로의 작품 7권을 완독하여 그의 문학 세계를 깊이 있게 이해하는 것이 목표입니다.",
+    "recommendedFor": "유럽 현대문학, 실존주의적 세계관, 독창적인 문체에 매료된 독자",
+    "guideText": "제시된 책 7권을 완독하고 ‘읽은 책’으로 등록하면 자동으로 체크됩니다.",
+
+    "stageType": "single",
+    "category": "growth",
+    "theme": "literature",
+    "method": "specificBooks",
+    "period": "daysBased",
+    "checkMode": "auto",
+
+    "durationOptions": [365],
+    "checkCountOptions": [],
+    "startDate": null,
+    "endDate": null,
+
+    "totalBooks": 7,
+    "requiredMinutes": null,
+    "requiredPages": 1,
+    "currentStageIndex": null,
+
+    "specificBookMode": "systemDefined",
+    "requiredBooks": [
+      {
+        "id": "isbn_9791159921445",
+        "title": "세탄탄고 (Satantango)",
+        "author": "László Krasznahorkai",
+        "isbn": "9791159921445",
+        "pageCount": 288
+      },
+      {
+        "id": "isbn_9791159922527",
+        "title": "저항의 멜랑콜리 (The Melancholy of Resistance)",
+        "author": "László Krasznahorkai",
+        "isbn": "9791159922527",
+        "pageCount": 320
+      },
+      {
+        "id": "isbn_9791159923746",
+        "title": "세계는 계속된다",
+        "author": "László Krasznahorkai",
+        "isbn": "9791159923746",
+        "pageCount": 475
+      },
+      {
+        "id": "isbn_9791159923500",
+        "title": "라스트 울프",
+        "author": "László Krasznahorkai",
+        "isbn": "9791159923500",
+        "pageCount": 127
+      },
+      {
+        "id": "isbn_9791159923630",
+        "title": "서왕모의 강림",
+        "author": "László Krasznahorkai",
+        "isbn": "9791159923630",
+        "pageCount": 683
+      },
+      {
+        "id": "isbn_9791159924248",
+        "title": "벵크하임 남작의 귀향",
+        "author": "László Krasznahorkai",
+        "isbn": "9791159924248",
+        "pageCount": 765
+      },
+      {
+        "id": "isbn_9791167375902",
+        "title": "죔레가 사라지다",
+        "author": "László Krasznahorkai",
+        "isbn": "9791167375902",
+        "pageCount": 288
+      }
+    ],
+    "participatingBooks": [],
+
+    "imageUrl": "assets/image/nobel_2025_literature.png",
+    "badgeImage": "assets/image/badge_theme.png",
+    "rewardTitle": "Krasznahorkai Mastery Badge",
+    "goalDisplayText": "작가의 작품 7권을 완독하세요!",
+    "periodDisplayText": "1년",
+
+    "isCustom": false,
+    "isPremium": false,
+    "isJoined": false,
+    "isCompleted": false,
+    "isRepeatable": false,
+    "forceBookSelection": false,
 
     "stageDurations": [],
     "attempts": [],

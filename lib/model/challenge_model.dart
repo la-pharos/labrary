@@ -134,40 +134,90 @@ class Challenge {
   }) : id = id ?? const Uuid().v4();
 
   factory Challenge.fromMap(Map<String, dynamic> map) {
+    final id = map['id'] as String?;
 
     return Challenge(
-      id: map['id'],
+      id: id,
       title: map['title'],
       shortDescription: map['shortDescription'],
       longDescription: map['longDescription'],
       goalDescription: map['goalDescription'],
       recommendedFor: map['recommendedFor'],
       guideText: map['guideText'],
-      stageType: ChallengeStageType.values.firstWhere((e) => e.name == map['stageType']),
-      category: ChallengeCategory.values.firstWhere((e) => e.name == map['category']),
-      method: ChallengeMethod.values.firstWhere((e) => e.name == map['method']),
-      period: ChallengePeriod.values.firstWhere((e) => e.name == map['period']),
-      checkMode: ChallengeCheckMode.values.firstWhere((e) => e.name == map['checkMode']),
+
+      stageType: _parseEnum(
+        ChallengeStageType.values,
+        map['stageType'],
+        ChallengeStageType.single,
+        fieldName: 'stageType',
+        id: id,
+      ),
+      category: _parseEnum(
+        ChallengeCategory.values,
+        map['category'],
+        ChallengeCategory.growth,
+        fieldName: 'category',
+        id: id,
+      ),
+      method: _parseEnum(
+        ChallengeMethod.values,
+        map['method'],
+        ChallengeMethod.specificBooks,
+        fieldName: 'method',
+        id: id,
+      ),
+      period: _parseEnum(
+        ChallengePeriod.values,
+        map['period'],
+        ChallengePeriod.periodBased,
+        fieldName: 'period',
+        id: id,
+      ),
+      checkMode: _parseEnum(
+        ChallengeCheckMode.values,
+        map['checkMode'],
+        ChallengeCheckMode.auto,
+        fieldName: 'checkMode',
+        id: id,
+      ),
 
       theme: map['theme'] != null
-          ? ChallengeTheme.values.firstWhere(
-            (e) => e.name == map['theme'],
-        orElse: () => ChallengeTheme.etc,
+          ? _parseEnum(
+        ChallengeTheme.values,
+        map['theme'],
+        ChallengeTheme.etc,
+        fieldName: 'theme',
+        id: id,
       )
           : null,
 
-      durationOptions: map['durationOptions'] != null ? List<int>.from(map['durationOptions']) : null,
-      checkCountOptions: map['checkCountOptions'] != null ? List<int>.from(map['checkCountOptions']) : null,
-      startDate: map['startDate'] != null ? DateTime.parse(map['startDate']).toLocal() : null,
-      endDate: map['endDate'] != null ? DateTime.parse(map['endDate']).toLocal() : null,
+      durationOptions: map['durationOptions'] != null
+          ? List<int>.from(map['durationOptions'])
+          : null,
+      checkCountOptions: map['checkCountOptions'] != null
+          ? List<int>.from(map['checkCountOptions'])
+          : null,
+      startDate: map['startDate'] != null
+          ? DateTime.parse(map['startDate']).toLocal()
+          : null,
+      endDate: map['endDate'] != null
+          ? DateTime.parse(map['endDate']).toLocal()
+          : null,
       totalBooks: map['totalBooks'],
       requiredMinutes: map['requiredMinutes'],
       requiredPages: map['requiredPages'],
+
       specificBookMode: map['specificBookMode'] != null
-          ? SpecificBookMode.values.firstWhere((e) => e.name == map['specificBookMode'])
+          ? _parseEnum(
+        SpecificBookMode.values,
+        map['specificBookMode'],
+        SpecificBookMode.systemDefined,
+        fieldName: 'specificBookMode',
+        id: id,
+      )
           : null,
+
       requiredBooksPoolId: map['requiredBooksPoolId'],
-      // 기존 requiredBooks는 그대로 둠(뒤호환)
       requiredBooks: map['requiredBooks'] != null
           ? (map['requiredBooks'] as List)
           .map((e) => BookModel.fromMap(Map<String, dynamic>.from(e)))
@@ -191,10 +241,17 @@ class Challenge {
       stageDurations: List<int>.from(map['stageDurations'] ?? []),
       attempts: map['attempts'] != null
           ? List<ChallengeAttempt>.from(
-          (map['attempts'] as List).map((e) => ChallengeAttempt.fromMap(Map<String, dynamic>.from(e))))
+        (map['attempts'] as List).map(
+              (e) => ChallengeAttempt.fromMap(Map<String, dynamic>.from(e)),
+        ),
+      )
           : [],
-      allowedStartTime: map['allowedStartTime'] != null ? _parseTime(map['allowedStartTime']) : null,
-      allowedEndTime: map['allowedEndTime'] != null ? _parseTime(map['allowedEndTime']) : null,
+      allowedStartTime: map['allowedStartTime'] != null
+          ? _parseTime(map['allowedStartTime'])
+          : null,
+      allowedEndTime: map['allowedEndTime'] != null
+          ? _parseTime(map['allowedEndTime'])
+          : null,
     );
   }
 
@@ -355,4 +412,25 @@ class Challenge {
 
   /// 완료 섹션 노출(아카이브면 제외)
   bool get isCompletedVisible => !isArchived && isCompleted;
+
+  static T _parseEnum<T extends Enum>(
+      List<T> values,
+      dynamic raw,
+      T fallback, {
+        required String fieldName,
+        String? id,
+      }) {
+    if (raw == null) {
+      debugPrint('❌ [Challenge.fromMap] $fieldName is null for id=$id. Using fallback: $fallback');
+      return fallback;
+    }
+
+    final rawStr = raw.toString();
+    final match = values.where((e) => e.name == rawStr);
+    if (match.isEmpty) {
+      debugPrint('❌ [Challenge.fromMap] Unknown $fieldName="$rawStr" for id=$id. Using fallback: $fallback');
+      return fallback;
+    }
+    return match.first;
+  }
 }
