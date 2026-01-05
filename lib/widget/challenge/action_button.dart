@@ -10,75 +10,74 @@ class ActionButton extends StatelessWidget {
   final Challenge challenge;
   final dynamic record;
 
-  // ✅ 선택: OngoingScreen에서 계산해 둔 타겟 도서 주입(풀/참여/구버전 포함)
+  /// ✅ OngoingScreen에서 계산해 둔 타겟 도서(풀/참여/구버전 포함)
   final List<BookModel>? targetBooksOverride;
 
   const ActionButton({
     super.key,
     required this.challenge,
     required this.record,
-    this.targetBooksOverride, // ← optional
+    this.targetBooksOverride,
   });
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery
-        .of(context)
-        .size
-        .width;
+    final screenWidth = MediaQuery.of(context).size.width;
     final buttonWidth = screenWidth * 0.9;
     final paddingVertical = screenWidth * 0.045;
     final fontSize = screenWidth * 0.045;
 
     DateTime strip(DateTime d) => DateTime(d.year, d.month, d.day);
 
-    final now = DateTime.now();
-    final today = strip(now);
+    // ✅ 로컬 기준 오늘(시간 제거)
+    final today = strip(DateTime.now().toLocal());
 
-    final attempt = challenge.attempts.isNotEmpty
-        ? challenge.attempts.last
-        : null;
+    final attempt = challenge.attempts.isNotEmpty ? challenge.attempts.last : null;
 
-    // 오늘 성공 여부(기존 로직 유지)
-    final isTodaySuccess = checkRoutineDateChecked(
+    // ✅ 루틴형만 "오늘 성공" 체크 적용
+    final bool isRoutine = challenge.category == ChallengeCategory.routine;
+    final bool isTodaySuccess = isRoutine
+        ? checkRoutineDateChecked(
       challenge: challenge,
       date: today,
       recordDataOrSavedBooks: record,
-    );
+    )
+        : false;
 
-    // ---- 도전 가능 윈도우 계산 (모든 챌린지 공통) ----
-    DateTime? start = attempt?.startDate;
+    // ---- 도전 가능 윈도우 계산 (start/end는 무조건 로컬 + strip) ----
+    DateTime? start;
     DateTime? end;
 
-    // daysBased: attempt.selectedDuration 우선
-    if (start != null && (attempt?.selectedDuration != null)) {
-      start = strip(start.toLocal());
-      end = start.add(Duration(days: attempt!.selectedDuration! - 1));
-    } else {
-      // attempt.endDate가 있으면 그것을 사용
-      if (attempt?.endDate != null) {
-        start = strip((attempt!.startDate).toLocal());
-        end = strip((attempt.endDate!).toLocal());
-      } else {
-        // periodBased 등 challenge 레벨 기간이 있을 때
-        if (challenge.startDate != null)
-          start = strip(challenge.startDate!.toLocal());
-        if (challenge.endDate != null)
-          end = strip(challenge.endDate!.toLocal());
+    if (attempt != null) {
+      // attempt 기반이 1순위
+      start = strip(attempt.startDate.toLocal());
+
+      // daysBased: selectedDuration이 있으면 end 계산
+      if (attempt.selectedDuration != null) {
+        end = start.add(Duration(days: attempt.selectedDuration! - 1));
+      } else if (attempt.endDate != null) {
+        // periodBased에서 attempt에 endDate가 있으면 사용
+        end = strip(attempt.endDate!.toLocal());
       }
     }
 
-    final bool isBeforeStart = (start != null) && today.isBefore(start);
-    final bool isAfterEnd = (end != null) && today.isAfter(end);
+    // attempt 기반으로 못 채우면 challenge 레벨 날짜 사용(있을 때만)
+    start ??= (challenge.startDate != null) ? strip(challenge.startDate!.toLocal()) : null;
+    end ??= (challenge.endDate != null) ? strip(challenge.endDate!.toLocal()) : null;
 
-    // ---- 비활성 조건: 시작 전 / 종료 후 / 오늘 이미 성공 ----
-    final bool isDisabled = isBeforeStart || isAfterEnd || isTodaySuccess;
+    final bool isBeforeStart = (start != null) && today.isBefore(start!);
+    final bool isAfterEnd = (end != null) && today.isAfter(end!);
+
+    // ✅ 비활성 조건:
+    // - 시작 전/종료 후: 공통
+    // - 오늘 이미 성공: 루틴형만
+    final bool isDisabled = isBeforeStart || isAfterEnd || (isRoutine && isTodaySuccess);
 
     final String buttonText = isBeforeStart
         ? "도전 시작 전이에요 💪"
         : isAfterEnd
         ? "도전 기간이 끝났어요"
-        : isTodaySuccess
+        : (isRoutine && isTodaySuccess)
         ? "오늘은 이미 성공 ✨"
         : "오늘의 도전 시작하기";
 
@@ -89,8 +88,7 @@ class ActionButton extends StatelessWidget {
         child: SizedBox(
           width: buttonWidth,
           child: ElevatedButton(
-            onPressed: isDisabled ? null : () =>
-                _handleNavigateToReading(context),
+            onPressed: isDisabled ? null : () => _handleNavigateToReading(context),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.redAccent,
               disabledBackgroundColor: Colors.redAccent.withOpacity(0.5),
@@ -114,54 +112,43 @@ class ActionButton extends StatelessWidget {
     );
   }
 
-  String _twoDigits(int n) => n.toString().padLeft(2, '0');
-
-  bool isSameDate(DateTime a, DateTime b) {
-    return a.year == b.year && a.month == b.month && a.day == b.day;
-  }
-
   void _handleNavigateToReading(BuildContext context) {
-    final savedBooks = context
-        .read<SavedBooksProvider>()
-        .savedBooks;
+    // savedBooks는 현재 여기서 직접 쓰진 않지만,
+    // 이후 타입별 분기 확장 시 필요할 수 있어 유지.
+    context.read<SavedBooksProvider>().savedBooks;
 
-    final isUserDefined = challenge.method == ChallengeMethod.specificBooks &&
-        challenge.specificBookMode == SpecificBookMode.userDefined &&
+    final checkType = getChallengeCheckActionType(challenge);
+
+    // ✅ 단일 + 사용자 지정도서 + 페이지연동: 이미 선택된 책이 있으면 자동 선택
+    final isUserDefinedSinglePageAuto =
         challenge.stageType == ChallengeStageType.single &&
-        getChallengeCheckActionType(challenge) ==
-            ChallengeCheckActionType.pageAuto;
+            challenge.method == ChallengeMethod.specificBooks &&
+            challenge.specificBookMode == SpecificBookMode.userDefined &&
+            checkType == ChallengeCheckActionType.pageAuto;
 
-    if (isUserDefined &&
-        challenge.participatingBooks != null &&
-        challenge.participatingBooks!.isNotEmpty) {
+    if (isUserDefinedSinglePageAuto &&
+        (challenge.participatingBooks?.isNotEmpty ?? false)) {
       final selectedBook = challenge.participatingBooks!.first;
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) =>
-              ReadingIntroScreen(
-                challenge: challenge,
-                initialBook: selectedBook,
-                // (필요 없다면 생략 가능)
-                candidateBooksOverride: targetBooksOverride, // ← 전달만
-              ),
+          builder: (_) => ReadingIntroScreen(
+            challenge: challenge,
+            initialBook: selectedBook,
+            candidateBooksOverride: targetBooksOverride,
+          ),
         ),
       );
       return;
     }
 
-    final isAdminDefinedPageAuto = challenge.method == ChallengeMethod.specificBooks &&
-        challenge.specificBookMode == SpecificBookMode.systemDefined &&
-        getChallengeCheckActionType(challenge) == ChallengeCheckActionType.pageAuto;
-
-    // 시스템 지정 + 페이지연동: 후보 목록을 화면에 넘겨주기만(선택 UI는 Intro에서)
+    // ✅ 그 외(운영자 지정 페이지연동 포함): Intro에서 선택/진입 처리
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => ReadingIntroScreen(
           challenge: challenge,
           initialBook: null,
-          // ✅ 풀에서 해석된 목록이 있다면 넘겨줌(ReadingIntroScreen에서 없으면 무시해도 됨)
           candidateBooksOverride: targetBooksOverride,
         ),
       ),

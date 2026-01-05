@@ -180,6 +180,19 @@ class _ChallengeOngoingScreenState extends State<ChallengeOngoingScreen> {
     }
 
     final checkType = getChallengeCheckActionType(_currentChallenge);
+    // ✅ 1) 지정도서 + 페이지 연동일 때만 “읽어야 할 책” 섹션
+    final shouldShowReadingBookSection =
+        _currentChallenge.method == ChallengeMethod.specificBooks &&
+            checkType == ChallengeCheckActionType.pageAuto;
+
+// ✅ 2) 권수(지정권수) 챌린지일 때만 “도전기간 내 읽은 책” 섹션
+    final shouldShowReadDoneSection =
+        _currentChallenge.method == ChallengeMethod.quantityBased;
+
+// ✅ 3) 루틴 달력(기존 조건 유지)
+    final shouldShowRoutineCalendar =
+        _currentChallenge.category == ChallengeCategory.routine &&
+            checkType != ChallengeCheckActionType.libraryAuto;
 
     return GestureDetector(
       onHorizontalDragUpdate: (details) {
@@ -225,26 +238,39 @@ class _ChallengeOngoingScreenState extends State<ChallengeOngoingScreen> {
                     targetBooksOverride: _displayTargetBooks, // ✅ 추가
                   ),
                   SizedBox(height: spacing),
-                  if (_currentChallenge.category == ChallengeCategory.routine &&
-                      checkType != ChallengeCheckActionType.libraryAuto)
+
+                  if (shouldShowRoutineCalendar)
                     RoutineCalendar(
                       challenge: _currentChallenge,
                       recordDataOrBooks: _recordWithBooks,
                     ),
+
                   SizedBox(height: spacing),
-                  Consumer<SavedBooksProvider>(
-                    builder: (context, savedBooksProvider, _) {
-                      return ReadingBookSection(
-                        challenge: _currentChallenge,
-                        savedBooks: savedBooksProvider.savedBooks,
-                        booksOverride: _displayTargetBooks, // ✅ 추가
-                      );
-                    },
-                  ),
-                  ReadDoneSection(
-                    challenge: _currentChallenge,
-                    booksOverride: _displayTargetBooks, // ✅ 추가
-                  ),                  SizedBox(height: spacing),
+
+// ✅ 지정도서+페이지
+                  if (shouldShowReadingBookSection) ...[
+                    Consumer<SavedBooksProvider>(
+                      builder: (context, savedBooksProvider, _) {
+                        return ReadingBookSection(
+                          challenge: _currentChallenge,
+                          savedBooks: savedBooksProvider.savedBooks,
+                          booksOverride: _displayTargetBooks,
+                          isLoading: _isLoadingPoolBooks,
+                        );
+                      },
+                    ),
+                    SizedBox(height: spacing),
+                  ],
+
+// ✅ 지정권수(권수형)
+                  if (shouldShowReadDoneSection) ...[
+                    ReadDoneSection(
+                      challenge: _currentChallenge,
+                      booksOverride: _displayTargetBooks, // (권수형이 특정 풀/참여도서로 제한될 수도 있으니 유지)
+                    ),
+                    SizedBox(height: spacing),
+                  ],
+                  SizedBox(height: spacing),
                   const Divider(color: Colors.white24),
                   SizedBox(height: spacing),
                   SummaryCard(challenge: _currentChallenge),
@@ -338,6 +364,7 @@ class _ChallengeOngoingScreenState extends State<ChallengeOngoingScreen> {
     if (refreshed == null) return;
 
     final checkType = getChallengeCheckActionType(refreshed);
+
     final record = (checkType == ChallengeCheckActionType.libraryAuto)
         ? savedBooks
         : (refreshed.attempts.isNotEmpty ? refreshed.attempts.last.recordData ?? {} : {});
