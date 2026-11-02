@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.0+15
+version: 1.1.8+56
 
 environment:
   sdk: ^3.6.1
@@ -36,10 +36,10 @@ dependencies:
   cupertino_icons: ^1.0.8
   package_info_plus: ^8.3.0
   intl: ^0.20.2
-  mobile_scanner: ^6.0.7
   image_picker: ^1.1.2
   provider: ^6.0.0
   uuid: ^4.2.1
+  path_provider: ^2.1.5
 
 
   # 🔥 FlutterFire (세대 맞춤)
@@ -47,31 +47,64 @@ dependencies:
   firebase_auth: ^5.0.0
   cloud_firestore: ^5.0.0
   firebase_storage: ^12.0.0
-  firebase_dynamic_links: ^6.1.0
   firebase_app_check: ^0.3.2+10   # ← 3.x 호환
+  firebase_remote_config: ^5.5.0
 
   table_calendar: ^3.0.8
-  shared_preferences: ^2.2.2
+  shared_preferences: ^2.5.3
   flutter_rating_bar: ^4.0.0
   country_picker: ^2.0.27
   flutter_image_compress: ^2.1.0
-  google_mobile_ads: ^5.0.0
+  google_mobile_ads: ^8.0.0
   url_launcher: ^6.2.5
   webview_flutter: ^4.5.0
-  in_app_purchase: ^3.1.7
-  share_plus: ^10.0.2
+  in_app_purchase: ^3.3.0
+  share_plus: ^12.0.2
+  cloud_functions: ^5.6.2
+
+  gal: 2.3.3
+  cached_network_image: ^3.4.1
+  crop_your_image: ^2.0.0
+  app_links: ^7.2.2
+  http: ^1.6.0
 
 dev_dependencies:
-
+  flutter_launcher_icons: ^0.13.1
+  flutter_native_splash: ^2.4.1
   flutter_test:
     sdk: flutter
+  flutter_lints: ^5.0.0
+
+
+flutter_launcher_icons:
+  ios: true
+  android: true
+  image_path: assets/image/app_icon.png
+  remove_alpha_ios: true
+
+  adaptive_icon_background: "#013328"
+  adaptive_icon_foreground: "assets/image/app_icon_foreground.png"
+
+flutter_native_splash:
+  color: "#013328"
+  image: assets/image/splash_logo.png
+
+  android: true
+  ios: true
+
+  android_12:
+    color: "#013328"
+    image: assets/image/splash_logo.png
+
+  # flutter_test:
+  #   sdk: flutter
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
   # activated in the `analysis_options.yaml` file located at the root of your
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
-  flutter_lints: ^5.0.0
+  # flutter_lints: ^5.0.0
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

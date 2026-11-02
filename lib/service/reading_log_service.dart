@@ -189,7 +189,9 @@ class ReadingLogService {
   }
 
   /// ✅ 특정 책의 독서 기록 조회
-  static Future<List<Map<String, dynamic>>> getTimerLogsForBook(String bookId) async {
+  static Future<List<Map<String, dynamic>>> getTimerLogsForBook(
+      String bookId,
+      ) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return [];
 
@@ -198,7 +200,6 @@ class ReadingLogService {
         .doc(uid)
         .collection('readingTimerLogs')
         .where('bookId', isEqualTo: bookId)
-        .orderBy('startTime', descending: true)
         .get();
 
     return snapshot.docs.map((doc) {
@@ -223,4 +224,239 @@ class ReadingLogService {
       await snapshot.docs.first.reference.delete();
     }
   }
+
+  /// 지정한 기간의 날짜별 독서시간 조회
+  ///
+  /// [start]는 포함하고 [end]는 포함하지 않음.
+  static Future<Map<String, int>> getReadingMinutesByRange({
+    required DateTime start,
+    required DateTime end,
+  }) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+
+    if (uid == null || !start.isBefore(end)) {
+      return {};
+    }
+
+    final snapshot = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('readingTimerLogs')
+        .where(
+      'startTime',
+      isGreaterThanOrEqualTo: Timestamp.fromDate(start),
+    )
+        .where(
+      'startTime',
+      isLessThan: Timestamp.fromDate(end),
+    )
+        .get();
+
+    final Map<String, int> dailyMinutes = {};
+
+    for (final doc in snapshot.docs) {
+      final data = doc.data();
+      final timestamp = data['startTime'];
+      final duration = (data['durationMinutes'] as num?)?.toInt() ?? 0;
+
+      DateTime? startTime;
+
+      if (timestamp is Timestamp) {
+        startTime = timestamp.toDate();
+      } else if (timestamp is String) {
+        startTime = DateTime.tryParse(timestamp);
+      }
+
+      if (startTime == null || duration <= 0) {
+        continue;
+      }
+
+      final dateKey = _formatDateKey(startTime);
+
+      dailyMinutes[dateKey] =
+          (dailyMinutes[dateKey] ?? 0) + duration;
+    }
+
+    return dailyMinutes;
+  }
+
+  static String _formatDateKey(DateTime date) {
+    return '${date.year}-'
+        '${date.month.toString().padLeft(2, '0')}-'
+        '${date.day.toString().padLeft(2, '0')}';
+  }
+
+  static Future<int> getTotalReadingSessions() async {
+    final uid =
+        FirebaseAuth.instance.currentUser?.uid;
+
+    if (uid == null) {
+      return 0;
+    }
+
+    final snapshot =
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('readingTimerLogs')
+        .count()
+        .get();
+
+    return snapshot.count ?? 0;
+  }
+
+  /// 지정한 기간의 독서 기록 횟수 조회
+  ///
+  /// [start]는 포함하고 [end]는 포함하지 않음.
+  static Future<int> getReadingSessionsByRange({
+    required DateTime start,
+    required DateTime end,
+  }) async {
+    final uid =
+        FirebaseAuth.instance.currentUser?.uid;
+
+    if (uid == null || !start.isBefore(end)) {
+      return 0;
+    }
+
+    final snapshot =
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('readingTimerLogs')
+        .where(
+      'startTime',
+      isGreaterThanOrEqualTo:
+      Timestamp.fromDate(start),
+    )
+        .where(
+      'startTime',
+      isLessThan:
+      Timestamp.fromDate(end),
+    )
+        .count()
+        .get();
+
+    return snapshot.count ?? 0;
+  }
+
+  /// 지정한 기간의 책별 누적 독서시간 조회
+  ///
+  /// 반환 형식:
+  /// {
+  ///   bookId: {
+  ///     'bookId': String,
+  ///     'title': String,
+  ///     'minutes': int,
+  ///   }
+  /// }
+  ///
+  /// [start]는 포함하고 [end]는 포함하지 않음.
+  static Future<
+      Map<String, Map<String, dynamic>>>
+  getReadingMinutesByBookRange({
+    required DateTime start,
+    required DateTime end,
+  }) async {
+    final uid =
+        FirebaseAuth.instance.currentUser?.uid;
+
+    if (uid == null || !start.isBefore(end)) {
+      return {};
+    }
+
+    final snapshot =
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('readingTimerLogs')
+        .where(
+      'startTime',
+      isGreaterThanOrEqualTo:
+      Timestamp.fromDate(start),
+    )
+        .where(
+      'startTime',
+      isLessThan:
+      Timestamp.fromDate(end),
+    )
+        .get();
+
+    final result =
+    <String, Map<String, dynamic>>{};
+
+    for (final doc in snapshot.docs) {
+      final data = doc.data();
+
+      final bookId =
+      (data['bookId'] ?? '').toString().trim();
+
+      final title =
+      (data['title'] ?? '').toString().trim();
+
+      final durationMinutes =
+          (data['durationMinutes'] as num?)
+              ?.toInt() ??
+              0;
+
+      if (bookId.isEmpty ||
+          durationMinutes < 1) {
+        continue;
+      }
+
+      final current = result[bookId];
+
+      if (current == null) {
+        result[bookId] = {
+          'bookId': bookId,
+          'title':
+          title.isEmpty ? '제목 없음' : title,
+          'minutes': durationMinutes,
+        };
+      } else {
+        current['minutes'] =
+            ((current['minutes'] as num?)
+                ?.toInt() ??
+                0) +
+                durationMinutes;
+      }
+    }
+
+    return result;
+  }
+
+  /// 지정한 기간에 가장 많이 읽은 책 조회
+  static Future<Map<String, dynamic>?>
+  getMostReadBookByRange({
+    required DateTime start,
+    required DateTime end,
+  }) async {
+    final bookStats =
+    await getReadingMinutesByBookRange(
+      start: start,
+      end: end,
+    );
+
+    Map<String, dynamic>? result;
+
+    for (final item in bookStats.values) {
+      final minutes =
+          (item['minutes'] as num?)?.toInt() ??
+              0;
+
+      final resultMinutes =
+          (result?['minutes'] as num?)
+              ?.toInt() ??
+              0;
+
+      if (result == null ||
+          minutes > resultMinutes) {
+        result =
+        Map<String, dynamic>.from(item);
+      }
+    }
+
+    return result;
+  }
+
 }

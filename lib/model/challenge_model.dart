@@ -9,8 +9,17 @@ enum ChallengeStageType { single, staged }
 /// ✅ 챌린지 카테고리 (루틴형 / 성장형)  ← 기존 의미 유지
 enum ChallengeCategory { routine, growth }
 
-/// ✅ 도전 방식: 지정 횟수 / 지정 도서 / 지정 권수
-enum ChallengeMethod { countBased, specificBooks, quantityBased }
+/// ✅ 도전 방식
+/// countBased    : 횟수 / 일일 루틴
+/// specificBooks : 지정 도서
+/// quantityBased : 완독 권수
+/// timeBased     : 기간 내 누적 독서시간
+enum ChallengeMethod {
+  countBased,
+  specificBooks,
+  quantityBased,
+  timeBased, // ✅ 신규: 주간 누적 독서시간 챌린지
+}
 
 /// ✅ 도전 기간: 기간형 / 일자형 / 지속형
 enum ChallengePeriod { periodBased, daysBased, infinite }
@@ -432,5 +441,30 @@ class Challenge {
       return fallback;
     }
     return match.first;
+  }
+
+  bool get isFinalStageCompleted {
+    if (stageType != ChallengeStageType.staged) return isCompleted;
+
+    final attempt = currentAttempt;
+    if (attempt == null) return false;
+
+    return (attempt.isCompleted == true) && isLastStage;
+  }
+
+  bool get isCurrentStageCompleted {
+    final attempt = attempts.isNotEmpty ? attempts.last : null;
+    return attempt?.isCompleted ?? false;
+  }
+
+  ChallengeAttempt? get currentAttempt {
+    if (attempts.isEmpty) return null;
+    return attempts.last;
+  }
+
+  bool get isLastStage {
+    if (stageType != ChallengeStageType.staged) return true;
+    if (stageDurations.isEmpty) return false;
+    return currentStageIndex >= stageDurations.length - 1;
   }
 }

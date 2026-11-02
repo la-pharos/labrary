@@ -1,0 +1,1391 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:dayverse_book/main.dart';
+import 'package:dayverse_book/screen/level_screen.dart';
+import 'package:dayverse_book/screen/memo_screen.dart';
+import 'package:dayverse_book/screen/challenge_done_screen.dart';
+import 'package:dayverse_book/screen/challenge_screen.dart';
+import 'package:dayverse_book/screen/reward_screen.dart';
+import 'package:dayverse_book/provider/saved_books_provider.dart';
+import 'package:dayverse_book/provider/challenge_provider.dart';
+import 'package:dayverse_book/utils/level_utils.dart';
+import 'package:dayverse_book/service/reading_log_service.dart';
+import 'package:dayverse_book/model/book_model.dart';
+import 'package:table_calendar/table_calendar.dart';
+import 'package:intl/intl.dart';
+import 'package:dayverse_book/widget/ad_banner_placeholder.dart';
+import 'package:dayverse_book/widget/card_box.dart';
+import 'package:dayverse_book/widget/card_box.dart';
+
+class ChartScreen extends StatefulWidget {
+  const ChartScreen({super.key});
+
+  @override
+  State<ChartScreen> createState() => _ChartScreenState();
+}
+
+class _ChartScreenState extends State<ChartScreen> {
+  DateTime _focusedDay = DateTime.now();
+  DateTime _selectedDay = DateTime.now();
+  Map<String, int> dailyReadingMinutes = {};
+  bool showAllRecords = false;
+  late Future<List<Map<String, dynamic>>> _selectedDayLogsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _loadDailyReadingMinutes(force: true);
+
+    _selectedDayLogsFuture =
+        ReadingLogService.getTimerLogsForDate(_selectedDay);
+  }
+
+  Future<void> _loadDailyReadingMinutes({bool force = false}) async {
+    if (force || dailyReadingMinutes.isEmpty) {
+      final map = await ReadingLogService.getTotalReadingMinutesByDate();
+      if (!mounted) return; // ✅ 화면이 아직 살아있을 때만 setState
+      setState(() {
+        dailyReadingMinutes = map;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.of(context).size.height;
+
+    final savedBooksProvider = Provider.of<SavedBooksProvider>(context);
+    final challengeProvider = Provider.of<ChallengeProvider>(context);
+
+    final savedBooks = savedBooksProvider.savedBooks;
+    final joinedChallenges = challengeProvider.joinedChallenges;
+    final completedChallenges = challengeProvider.completedChallenges;
+
+    final totalRead = savedBooks.where((b) => b.category == 'done').length;
+    final currentLevel = LevelUtils.getCurrentLevel(totalRead);
+    final int booksToNext =
+    LevelUtils.getBooksUntilNextLevel(totalRead);
+
+    final paddingH = screenWidth * 0.05;
+    final sectionGap = screenHeight * 0.02;
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF013328),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(height: screenHeight * 0.065),
+          _buildTopBar(screenWidth),
+          Expanded(
+            child: SingleChildScrollView(
+              padding: EdgeInsets.symmetric(
+                horizontal: screenWidth * 0.05,
+                vertical: screenHeight * 0.01,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(height: sectionGap * 0.5),
+                  _buildOverviewCard(context, completedChallenges),
+                  SizedBox(height: sectionGap),
+                  const Divider(color: Colors.white24, thickness: 1),
+                  SizedBox(height: sectionGap),
+                  Text("독서 레벨",
+                      style: TextStyle(
+                          fontSize: screenWidth * 0.04,
+                          fontFamily: 'kopub',
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white)),
+                  SizedBox(height: sectionGap),
+                  _buildLevelCard(context, currentLevel, totalRead, booksToNext),
+                  SizedBox(height: sectionGap),
+                  Text("독서 통계",
+                      style: TextStyle(
+                          fontSize: screenWidth * 0.04,
+                          fontFamily: 'kopub',
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white)),
+                  SizedBox(height: sectionGap),
+                  _buildStatisticsGrid(context, savedBooks),
+                  SizedBox(height: sectionGap * 0.5),
+                  _buildCalendar(context),
+                  SizedBox(height: sectionGap * 0.5),
+                  _buildSelectedDayInfo(context),
+                  SizedBox(height: sectionGap * 2),
+                  _buildNoteSection(context),
+                  SizedBox(height: sectionGap * 2),
+                  _buildCompletedChallengesSection(context, completedChallenges),
+                  SizedBox(height: screenHeight * 0.2),
+
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTopBar(double screenWidth) {
+    return Padding(
+      padding: EdgeInsets.symmetric(
+        horizontal: screenWidth * 0.05,
+        vertical: screenWidth * 0.0055,
+      ),
+      child: Text(
+        "ABOUT",
+        style: TextStyle(
+          color: Colors.white,
+          fontFamily: 'kopub',
+          fontSize: screenWidth * 0.045,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 1.5,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOverviewCard(
+      BuildContext context,
+      List completedChallenges,
+      ) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.of(context).size.height;
+
+    final totalMinutes =
+    dailyReadingMinutes.values.fold(0, (sum, value) => sum + value);
+    final readingDays = dailyReadingMinutes.keys.length;
+
+    final hours = totalMinutes ~/ 60;
+    final minutes = totalMinutes % 60;
+
+    final formattedTime = hours > 0
+        ? minutes == 0
+        ? '${hours}시간'
+        : '${hours}시간 ${minutes}분'
+        : '${minutes}분';
+
+    return CardBox(
+      margin: EdgeInsets.symmetric(
+        horizontal: screenWidth * 0.02,
+      ),
+      padding: EdgeInsets.symmetric(
+        horizontal: screenWidth * 0.04,
+        vertical: screenHeight * 0.02,
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: _buildOverviewItem(
+              context,
+              Icons.timer_outlined,
+              '누적 독서 시간',
+              formattedTime,
+            ),
+          ),
+          Expanded(
+            child: _buildOverviewItem(
+              context,
+              Icons.calendar_today_outlined,
+              '누적 독서일',
+              '$readingDays일',
+            ),
+          ),
+          Expanded(
+            child: _buildOverviewItem(
+              context,
+              Icons.emoji_events_outlined,
+              '획득 리워드',
+              '준비 중',
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOverviewItem(
+      BuildContext context,
+      IconData icon,
+      String label,
+      String value,
+      ) {
+    final screenWidth = MediaQuery.of(context).size.width;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          icon,
+          color: Colors.amberAccent,
+          size: screenWidth * 0.055,
+        ),
+        SizedBox(height: screenWidth * 0.015),
+        Text(
+          value,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: Colors.white,
+            fontFamily: 'kopub',
+            fontWeight: FontWeight.bold,
+            fontSize: screenWidth * 0.033,
+          ),
+        ),
+        SizedBox(height: screenWidth * 0.005),
+        Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: Colors.white70,
+            fontFamily: 'kopub',
+            fontSize: screenWidth * 0.027,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLevelCard(
+      BuildContext context,
+      LevelInfo level,
+      int totalRead,
+      int toNext,
+      ) {
+    final screenWidth = MediaQuery.of(context).size.width;
+
+    final padding = screenWidth * 0.045;
+    final spacing = screenWidth * 0.04;
+    final levelFontSize = screenWidth * 0.045;
+    final descFontSize = screenWidth * 0.035;
+    final progressFontSize = screenWidth * 0.03;
+
+    final progress = LevelUtils.getLevelProgress(totalRead);
+
+    return CardBox(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => LevelScreen(
+              totalRead: totalRead,
+              currentLevel: level,
+              booksToNext: toNext,
+            ),
+          ),
+        );
+      },
+      padding: EdgeInsets.all(padding),
+      margin: EdgeInsets.only(
+        bottom: spacing,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              LevelUtils.buildLevelIcon(level),
+              SizedBox(width: screenWidth * 0.02),
+              Flexible(
+                child: Text(
+                  level.name,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontFamily: 'kopub',
+                    fontSize: levelFontSize,
+                    fontWeight: FontWeight.bold,
+                    color: level.color,
+                  ),
+                ),
+              ),
+            ],
+          ),
+
+          SizedBox(height: spacing * 0.45),
+
+          Text(
+            level.description,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white70,
+              fontFamily: 'kopub',
+              fontSize: descFontSize,
+              height: 1.4,
+            ),
+          ),
+
+          SizedBox(height: spacing * 0.8),
+
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: LinearProgressIndicator(
+              value: progress,
+              backgroundColor: Colors.white24,
+              color: level.color,
+              minHeight: screenWidth * 0.02,
+            ),
+          ),
+
+          SizedBox(height: spacing * 0.4),
+
+          Text(
+            level.end == null
+                ? '최고 레벨을 달성했어요'
+                : '다음 레벨까지 $toNext권 남음',
+            style: TextStyle(
+              color: Colors.white70,
+              fontFamily: 'kopub',
+              fontSize: progressFontSize,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatisticsGrid(BuildContext context, List<BookModel> books) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final startOfWeek = today.subtract(Duration(days: today.weekday - 1));
+    final endOfWeek = startOfWeek.add(const Duration(days: 6));
+    final screenWidth = MediaQuery.of(context).size.width;
+    final double boxWidth = (screenWidth - 40 - 16) / 2;
+
+    int totalBooks = books.where((b) => b.category == "done").length;
+    int yearBooks = books.where((b) => b.category == "done" && b.endDate?.year == now.year).length;
+    int monthBooks = books.where((b) => b.category == "done" && b.endDate?.year == now.year && b.endDate?.month == now.month).length;
+    int weekBooks = books.where((b) {
+      if (b.category != "done" || b.endDate == null) return false;
+      final d = DateTime(b.endDate!.year, b.endDate!.month, b.endDate!.day);
+      return !d.isBefore(startOfWeek) && !d.isAfter(endOfWeek);
+    }).length;
+
+    return FutureBuilder<Map<String, int>>(
+      future: ReadingLogService.getTotalReadingMinutesByDate(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        final dailyMinutes = snapshot.data!;
+        int totalMinutes = dailyMinutes.values.fold(0, (sum, v) => sum + v);
+        int yearMinutes = dailyMinutes.entries.where((e) => DateTime.parse(e.key).year == now.year).fold(0, (sum, e) => sum + e.value);
+        int monthMinutes = dailyMinutes.entries.where((e) {
+          final d = DateTime.parse(e.key);
+          return d.year == now.year && d.month == now.month;
+        }).fold(0, (sum, e) => sum + e.value);
+        int weekMinutes = dailyMinutes.entries.where((e) {
+          final d = DateTime.parse(e.key);
+          final dOnly = DateTime(d.year, d.month, d.day);
+          return !dOnly.isBefore(startOfWeek) && !dOnly.isAfter(endOfWeek);
+        }).fold(0, (sum, e) => sum + e.value);
+
+        return Center(
+          child: Column(
+            children: [
+              Wrap(
+                spacing: 8,
+                runSpacing: 10,
+                alignment: WrapAlignment.center,
+                children: [
+                  _buildStatBox("전체 권수", "$totalBooks권", boxWidth),
+                  _buildStatBox("올해 권수", "$yearBooks권", boxWidth),
+                  _buildStatBox("이번 달 권수", "$monthBooks권", boxWidth),
+                  _buildStatBox("이번 주 권수", "$weekBooks권", boxWidth),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Container(
+                height: 1,
+                width: double.infinity,
+                color: Colors.white24,
+                margin: const EdgeInsets.symmetric(horizontal: 20),
+              ),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 8,
+                runSpacing: 10,
+                alignment: WrapAlignment.center,
+                children: [
+                  _buildStatBox(
+                    '전체 독서시간',
+                    _formatMinutes(totalMinutes),
+                    boxWidth,
+                  ),
+                  _buildStatBox(
+                    '올해 독서시간',
+                    _formatMinutes(yearMinutes),
+                    boxWidth,
+                  ),
+                  _buildStatBox(
+                    '이번 달 독서시간',
+                    _formatMinutes(monthMinutes),
+                    boxWidth,
+                  ),
+                  _buildStatBox(
+                    '이번 주 독서시간',
+                    _formatMinutes(weekMinutes),
+                    boxWidth,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  String _formatMinutes(int totalMinutes) {
+    if (totalMinutes < 60) {
+      return '$totalMinutes분';
+    }
+
+    final hours = totalMinutes ~/ 60;
+    final minutes = totalMinutes % 60;
+
+    if (minutes == 0) {
+      return '$hours시간';
+    }
+
+    return '$hours시간 $minutes분';
+  }
+
+  Widget _buildStatBox(
+      String title,
+      String subtitle,
+      double width,
+      ) {
+    return SizedBox(
+      width: width,
+      height: width * 0.5,
+      child: CardBox(
+        margin: EdgeInsets.zero,
+        padding: const EdgeInsets.all(15),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white70,
+                fontFamily: 'kopub',
+                fontWeight: FontWeight.bold,
+                fontSize: width * 0.075,
+              ),
+            ),
+
+            SizedBox(height: width * 0.04),
+
+            Text(
+              subtitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white,
+                fontFamily: 'kopub',
+                fontSize: width * 0.085,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 📌 Calendar 위젯 추가
+  Widget _buildCalendar(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 16,
+        vertical: 16,
+      ),
+      child: TableCalendar(
+        locale: 'en_US',
+        firstDay: DateTime.utc(2020, 1, 1),
+        lastDay: DateTime.utc(2030, 12, 31),
+
+        focusedDay: _focusedDay,
+
+        selectedDayPredicate: (day) {
+          return isSameDay(_selectedDay, day);
+        },
+
+        onDaySelected: (selectedDay, focusedDay) {
+          if (isSameDay(_selectedDay, selectedDay)) {
+            return;
+          }
+
+          setState(() {
+            _selectedDay = selectedDay;
+            _focusedDay = focusedDay;
+            showAllRecords = false;
+
+            _selectedDayLogsFuture =
+                ReadingLogService.getTimerLogsForDate(selectedDay);
+          });
+        },
+
+        onPageChanged: (focusedDay) {
+          _focusedDay = focusedDay;
+        },
+
+        startingDayOfWeek: StartingDayOfWeek.monday,
+
+        headerStyle: const HeaderStyle(
+          formatButtonVisible: false,
+          titleCentered: true,
+          titleTextStyle: TextStyle(
+            color: Colors.white,
+            fontSize: 16,
+            fontFamily: 'kopub',
+            fontWeight: FontWeight.bold,
+          ),
+          leftChevronIcon: Icon(
+            Icons.chevron_left,
+            color: Colors.white,
+          ),
+          rightChevronIcon: Icon(
+            Icons.chevron_right,
+            color: Colors.white,
+          ),
+        ),
+
+        daysOfWeekStyle: const DaysOfWeekStyle(
+          weekdayStyle: TextStyle(
+            color: Colors.white,
+          ),
+          weekendStyle: TextStyle(
+            color: Colors.redAccent,
+          ),
+        ),
+
+        calendarStyle: CalendarStyle(
+          defaultTextStyle: const TextStyle(
+            color: Colors.white,
+          ),
+          weekendTextStyle: const TextStyle(
+            color: Colors.white,
+          ),
+          todayTextStyle: const TextStyle(
+            color: Colors.amberAccent,
+            fontWeight: FontWeight.bold,
+          ),
+          todayDecoration: const BoxDecoration(),
+          selectedTextStyle: const TextStyle(
+            color: Colors.black,
+          ),
+          selectedDecoration: const BoxDecoration(
+            color: Colors.amberAccent,
+            shape: BoxShape.circle,
+          ),
+          markerDecoration: const BoxDecoration(
+            color: Colors.amberAccent,
+            shape: BoxShape.circle,
+          ),
+          markersMaxCount: 1,
+          outsideTextStyle: const TextStyle(
+            color: Colors.white24,
+          ),
+        ),
+
+        // 기록이 있는 날짜의 노란 점 표시
+        eventLoader: (day) {
+          final key = _formatDateKey(day);
+          final minutes = dailyReadingMinutes[key];
+
+          return minutes != null && minutes > 0
+              ? [minutes]
+              : [];
+        },
+      ),
+    );
+  }
+
+  String _formatDateKey(DateTime date) {
+    return '${date.year}-'
+        '${date.month.toString().padLeft(2, '0')}-'
+        '${date.day.toString().padLeft(2, '0')}';
+  }
+
+  Widget _buildSelectedDayInfo(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final key = _formatDateKey(_selectedDay);
+    final totalMinutes = dailyReadingMinutes[key] ?? 0;
+    final savedBooks = Provider.of<SavedBooksProvider>(context).savedBooks;
+
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: _selectedDayLogsFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        final records = snapshot.data ?? [];
+
+        final Map<String, Map<String, dynamic>> groupedRecords = {};
+        for (final record in records) {
+          final title = record['title'] ?? '';
+          if (!groupedRecords.containsKey(title)) {
+            groupedRecords[title] = {
+              'title': title,
+              'durationMinutes': 0,
+            };
+          }
+          groupedRecords[title]!['durationMinutes'] += record['durationMinutes'] ?? 0;
+        }
+
+        final visibleRecords = showAllRecords
+            ? groupedRecords.values.toList()
+            : groupedRecords.values.take(3).toList();
+        final hasMore = groupedRecords.length > 3;
+
+        return Container(
+          width: double.infinity,
+          margin: EdgeInsets.symmetric(horizontal: screenWidth * 0.04),
+          padding: EdgeInsets.all(screenWidth * 0.04),
+          decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(12)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "총 독서 시간: ${totalMinutes}분",
+                style: TextStyle(
+                  color: Colors.amberAccent,
+                  fontFamily: 'kopub',
+                  fontWeight: FontWeight.bold,
+                  fontSize: screenWidth * 0.035,
+                ),
+              ),
+              SizedBox(height: screenWidth * 0.03),
+              if (records.isEmpty)
+                Text(
+                  "이 날에는 독서 기록이 없습니다.",
+                  style: TextStyle(
+                      color: Colors.white38,
+                      fontFamily: 'kopub',
+                      fontSize: screenWidth * 0.035),
+                )
+              else ...[
+                Column(
+                  children: visibleRecords.map((record) {
+                    final title = record['title'] ?? '';
+                    final minutes = record['durationMinutes'] ?? 0;
+                    final matchedBook = savedBooks.firstWhere(
+                          (b) => b.title == title,
+                      orElse: () => BookModel(title: title, author: '작자 미상'),
+                    );
+                    return _buildBookListItem(
+                      context,
+                      matchedBook.title,
+                      matchedBook.author,
+                      matchedBook.imageUrl,
+                      minutes,
+                    );
+                  }).toList(),
+                ),
+                if (hasMore)
+                  GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        showAllRecords = !showAllRecords;
+                      });
+                    },
+                    child: Padding(
+                      padding: EdgeInsets.only(top: screenWidth * 0.02),
+                      child: Center(
+                        child: Text(
+                          showAllRecords ? "접기 ▲" : "펼쳐보기 ▼",
+                          style: TextStyle(
+                            color: Colors.white60,
+                            fontFamily: 'kopub',
+                            fontSize: screenWidth * 0.035,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ]
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildBookListItem(
+      BuildContext context,
+      String title,
+      String? author,
+      String? imageUrl,
+      int minutes,
+      ) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.of(context).size.height;
+
+    final imageWidth = screenWidth * 0.145;
+    final imageHeight = imageWidth * 1.4;
+
+    final String readingTimeText;
+
+    if (minutes >= 60) {
+      final hours = minutes ~/ 60;
+      final remainMinutes = minutes % 60;
+
+      readingTimeText = remainMinutes == 0
+          ? '$hours시간'
+          : '$hours시간 $remainMinutes분';
+    } else {
+      readingTimeText = '$minutes분';
+    }
+
+    return Container(
+      margin: EdgeInsets.only(
+        bottom: screenHeight * 0.014,
+      ),
+      padding: EdgeInsets.all(
+        screenWidth * 0.035,
+      ),
+      decoration: BoxDecoration(
+        color: const Color(0xFF16483F),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Colors.white.withOpacity(0.08),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.12),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.25),
+                  blurRadius: 8,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: imageUrl?.trim().isNotEmpty == true
+                  ? Image.network(
+                imageUrl!,
+                width: imageWidth,
+                height: imageHeight,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) =>
+                    _buildBookListPlaceholder(
+                      imageWidth,
+                      imageHeight,
+                    ),
+              )
+                  : _buildBookListPlaceholder(
+                imageWidth,
+                imageHeight,
+              ),
+            ),
+          ),
+
+          SizedBox(width: screenWidth * 0.04),
+
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: screenWidth * 0.035,
+                    fontFamily: 'kopub',
+                    fontWeight: FontWeight.bold,
+                    height: 1.3,
+                  ),
+                ),
+
+                SizedBox(height: screenHeight * 0.006),
+
+                Text(
+                  author?.trim().isNotEmpty == true
+                      ? author!
+                      : '작자 미상',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white60,
+                    fontSize: screenWidth * 0.029,
+                    fontFamily: 'kopub',
+                  ),
+                ),
+
+                SizedBox(height: screenHeight * 0.012),
+
+                Container(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: screenWidth * 0.025,
+                    vertical: screenHeight * 0.006,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.amberAccent.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: Colors.amberAccent.withOpacity(0.35),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.schedule_rounded,
+                        color: Colors.amberAccent,
+                        size: screenWidth * 0.04,
+                      ),
+                      SizedBox(width: screenWidth * 0.012),
+                      Text(
+                        readingTimeText,
+                        style: TextStyle(
+                          color: Colors.amberAccent,
+                          fontSize: screenWidth * 0.029,
+                          fontWeight: FontWeight.bold,
+                          fontFamily: 'kopub',
+                        ),
+                      ),
+                    ],
+                  )
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBookListPlaceholder(
+      double width,
+      double height,
+      ) {
+    return Container(
+      width: width,
+      height: height,
+      color: Colors.white12,
+      child: const Icon(
+        Icons.book_rounded,
+        color: Colors.white38,
+      ),
+    );
+  }
+
+  /// 독서 메
+  Widget _buildNoteSection(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.of(context).size.height;
+
+    final savedBooksProvider = context.watch<SavedBooksProvider>();
+
+    final allNotes = savedBooksProvider.bookRecords
+        .where((record) => record['content'] != '독서 타이머 기록')
+        .toList();
+
+    allNotes.sort((a, b) {
+      final dateA = a['date'];
+      final dateB = b['date'];
+
+      if (dateA == null && dateB == null) return 0;
+      if (dateA == null) return 1;
+      if (dateB == null) return -1;
+
+      return dateB.compareTo(dateA);
+    });
+
+    final int totalNotes = allNotes.length;
+    final Map<String, dynamic>? latestNote =
+    allNotes.isNotEmpty ? allNotes.first : null;
+
+    final book = latestNote != null
+        ? savedBooksProvider.getBookById(
+      latestNote['bookId']?.toString() ?? '',
+    )
+        : null;
+
+    final String latestContent =
+        latestNote?['content']?.toString().trim() ?? '';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                '독서 메모',
+                style: TextStyle(
+                  fontSize: screenWidth * 0.04,
+                  fontFamily: 'kopub',
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ],
+        ),
+
+        SizedBox(height: screenWidth * 0.04),
+
+        CardBox(
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const MemoScreen(),
+              ),
+            );
+          },
+
+          // 빈 상태는 현재 크기 유지,
+          // 메모가 있으면 내부 여백을 조금 더 넓게
+          padding: EdgeInsets.all(
+            totalNotes == 0
+                ? screenWidth * 0.025
+                : screenWidth * 0.04,
+          ),
+
+          child: totalNotes == 0
+              ? _buildEmptyNoteCard(
+            screenWidth,
+            screenHeight,
+          )
+              : _buildLatestNoteCard(
+            screenWidth: screenWidth,
+            screenHeight: screenHeight,
+            book: book,
+            latestContent: latestContent,
+            totalNotes: totalNotes,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildEmptyNoteCard(
+      double screenWidth,
+      double screenHeight,
+      ) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Container(
+          width: screenWidth * 0.14,
+          height: screenWidth * 0.14,
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.07),
+            borderRadius: BorderRadius.circular(
+              screenWidth * 0.02,
+            ),
+          ),
+          child: Icon(
+            Icons.edit_note_rounded,
+            color: Colors.white54,
+            size: screenWidth * 0.065,
+          ),
+        ),
+
+        SizedBox(width: screenWidth * 0.03),
+
+        Expanded(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '첫 독서 메모를 남겨보세요',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontFamily: 'kopub',
+                  fontSize: screenWidth * 0.035,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              SizedBox(height: screenHeight * 0.003),
+              Text(
+                '책을 읽으며 떠오른 생각을 기록할 수 있어요.',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: Colors.white60,
+                  fontFamily: 'kopub',
+                  fontSize: screenWidth * 0.029,
+                  height: 1.3,
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        SizedBox(width: screenWidth * 0.02),
+
+        Container(
+          width: screenWidth * 0.075,
+          height: screenWidth * 0.075,
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.07),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(
+            Icons.chevron_right_rounded,
+            color: Colors.white60,
+            size: screenWidth * 0.05,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLatestNoteCard({
+    required double screenWidth,
+    required double screenHeight,
+    required BookModel? book,
+    required String latestContent,
+    required int totalNotes,
+  }) {
+    final imageWidth = screenWidth * 0.145;
+    final imageHeight = imageWidth * 1.4;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(
+              Icons.edit_note_rounded,
+              color: Colors.amberAccent,
+              size: screenWidth * 0.043,
+            ),
+            SizedBox(width: screenWidth * 0.015),
+            Expanded(
+              child: Text(
+                '총 독서 메모',
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontFamily: 'kopub',
+                  fontSize: screenWidth * 0.032,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            Container(
+              padding: EdgeInsets.symmetric(
+                horizontal: screenWidth * 0.025,
+                vertical: screenHeight * 0.006,
+              ),
+              decoration: BoxDecoration(
+                color: Colors.amberAccent.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: Colors.amberAccent.withOpacity(0.35),
+                ),
+              ),
+              child: Text(
+                '$totalNotes개',
+                style: TextStyle(
+                  color: Colors.amberAccent,
+                  fontFamily: 'kopub',
+                  fontSize: screenWidth * 0.03,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+
+        SizedBox(height: screenHeight * 0.014),
+
+        Divider(
+          height: 1,
+          thickness: 1,
+          color: Colors.white.withOpacity(0.08),
+        ),
+
+        SizedBox(height: screenHeight * 0.014),
+
+        Row(
+          children: [
+            Icon(
+              Icons.history_rounded,
+              color: Colors.amberAccent,
+              size: screenWidth * 0.043,
+            ),
+            SizedBox(width: screenWidth * 0.015),
+            Expanded(
+              child: Text(
+                '가장 최근 독서 메모',
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontFamily: 'kopub',
+                  fontSize: screenWidth * 0.03,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            Icon(
+              Icons.chevron_right_rounded,
+              color: Colors.white54,
+              size: screenWidth * 0.055,
+            ),
+          ],
+        ),
+
+        SizedBox(height: screenHeight * 0.014),
+
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.25),
+                    blurRadius: 8,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: book?.imageUrl?.trim().isNotEmpty == true
+                    ? Image.network(
+                  book!.imageUrl!,
+                  width: imageWidth,
+                  height: imageHeight,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) =>
+                      _buildNoteBookPlaceholder(
+                        imageWidth,
+                        imageHeight,
+                      ),
+                )
+                    : _buildNoteBookPlaceholder(
+                  imageWidth,
+                  imageHeight,
+                ),
+              ),
+            ),
+
+            SizedBox(width: screenWidth * 0.035),
+
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    book?.title ?? '도서 정보 없음',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontFamily: 'kopub',
+                      fontSize: screenWidth * 0.035,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+
+                  SizedBox(height: screenHeight * 0.005),
+
+                  Text(
+                    book != null && book.author.trim().isNotEmpty
+                        ? book.author
+                        : '작자 미상',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.white60,
+                      fontFamily: 'kopub',
+                      fontSize: screenWidth * 0.029,
+                    ),
+                  ),
+
+                  SizedBox(height: screenHeight * 0.012),
+
+                  Container(
+                    width: double.infinity,
+                    padding: EdgeInsets.symmetric(
+                      horizontal: screenWidth * 0.028,
+                      vertical: screenHeight * 0.01,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      latestContent.isNotEmpty
+                          ? latestContent
+                          : '작성된 메모 내용이 없습니다.',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontFamily: 'kopub',
+                        fontSize: screenWidth * 0.029,
+                        height: 1.45,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildNoteBookPlaceholder(
+      double width,
+      double height,
+      ) {
+    return Container(
+      width: width,
+      height: height,
+      color: Colors.white12,
+      child: const Icon(
+        Icons.book_rounded,
+        color: Colors.white38,
+      ),
+    );
+  }
+
+  /// 달성한 챌린지
+  Widget _buildCompletedChallengesSection(BuildContext context, List completedChallenges) {
+    final screenWidth = MediaQuery.of(context).size.width;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(// 🏆
+              "달성한 챌린지",
+              style: TextStyle(
+                fontSize: screenWidth * 0.04,
+                fontFamily: 'kopub',
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+          ],
+        ),
+        SizedBox(height: screenWidth * 0.04),
+        if (completedChallenges.isEmpty)
+          _buildChallengeLikePlaceholderBox(
+            context,
+            screenWidth,
+          )
+        else
+          Column(
+            children: completedChallenges.map<Widget>((challenge) {
+              return ChallengeCard(
+                challenge: challenge,
+                showAttemptsBadge: true,
+                stageChipDisplayMode: StageChipDisplayMode.completed,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          ChallengeDoneScreen(challenge: challenge),
+                    ),
+                  );
+                },
+              );
+            }).toList(),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildChallengeLikePlaceholderBox(
+      BuildContext context,
+      double screenWidth,
+      ) {
+    final screenHeight = MediaQuery.of(context).size.height;
+
+    return CardBox(
+      padding: EdgeInsets.all(screenWidth * 0.025),
+      child: Row(
+        children: [
+          Container(
+            width: screenWidth * 0.14,
+            height: screenWidth * 0.14,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.07),
+              borderRadius: BorderRadius.circular(
+                screenWidth * 0.02,
+              ),
+            ),
+            child: Icon(
+              Icons.emoji_events_outlined,
+              color: Colors.white54,
+              size: screenWidth * 0.065,
+            ),
+          ),
+
+          SizedBox(width: screenWidth * 0.03),
+
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '아직 달성한 챌린지가 없어요',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontFamily: 'kopub',
+                    fontSize: screenWidth * 0.035,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                SizedBox(height: screenHeight * 0.005),
+                Text(
+                  '챌린지에 도전하고 첫 기록을 만들어보세요.',
+                  style: TextStyle(
+                    color: Colors.white60,
+                    fontFamily: 'kopub',
+                    fontSize: screenWidth * 0.029,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+}

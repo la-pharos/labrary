@@ -7,22 +7,27 @@ plugins {
 
 def keystoreProperties = new Properties()
 def keystorePropertiesFile = rootProject.file("key.properties")
-if (keystorePropertiesFile.exists()) {
+def hasKeystore = keystorePropertiesFile.exists()
+
+if (hasKeystore) {
     keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
 } else {
-    throw new GradleException("key.properties file not found at: ${keystorePropertiesFile.path}")
+    println("⚠️ key.properties not found at: ${keystorePropertiesFile.path}")
+    println("⚠️ Release signing will be skipped. Debug build will still work.")
 }
 
 android {
     namespace = "com.la_pharos.labrary"
 
+    ndkVersion = "28.2.13676358"
+
     // 🔼 FlutterFire 최신 조합 권장값
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.la_pharos.labrary"
-        minSdk = 23          // ✅ 최신 Firebase 패키지 권장
-        targetSdk = 35
+        minSdkVersion = flutter.minSdkVersion          // ✅ 최신 Firebase 패키지 권장
+        targetSdk = 36
 
         versionCode = flutter.versionCode
         versionName = flutter.versionName
@@ -39,34 +44,43 @@ android {
 
     signingConfigs {
         release {
-            def storeFilePath = keystoreProperties['storeFile']
-            println "📦 storeFilePath = ${storeFilePath}"
-            if (storeFilePath == null || storeFilePath.trim().isEmpty()) {
-                throw new GradleException("storeFile is missing or empty in key.properties")
+            if (hasKeystore) {
+                def storeFilePath = keystoreProperties['storeFile']
+                println "📦 storeFilePath = ${storeFilePath}"
+
+                if (storeFilePath == null || storeFilePath.toString().trim().isEmpty()) {
+                    throw new GradleException("storeFile is missing or empty in key.properties")
+                }
+
+                storeFile file(storeFilePath)
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            } else {
+                // 키 없으면 release 서명 설정을 비워둠 (debug 빌드는 영향 없음)
             }
-            storeFile file(storeFilePath)
-            storePassword keystoreProperties['storePassword']
-            keyAlias keystoreProperties['keyAlias']
-            keyPassword keystoreProperties['keyPassword']
         }
     }
 
     buildTypes {
-        release {
-            signingConfig signingConfigs.release
+        debug {
+            // debug는 signingConfig 굳이 안 건드려도 됨
+        }
 
-            // ✅ 난독화 + 최적화
+        release {
+            // ✅ 키가 있을 때만 signingConfig 적용
+            if (hasKeystore) {
+                signingConfig signingConfigs.release
+            }
+
             minifyEnabled true
-            // ✅ 사용되지 않는 리소스 제거
             shrinkResources true
 
-            // ✅ 기본 R8 규칙 + 우리 규칙 파일
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'),
                     'proguard-rules.pro'
 
-            // ✅ 네이티브 심볼(zip) 생성 (아래 2)번과 연결)
             ndk {
-                debugSymbolLevel 'FULL'   // 또는 'SYMBOL_TABLE'
+                debugSymbolLevel 'FULL'
             }
         }
     }

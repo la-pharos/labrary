@@ -1,0 +1,15 @@
+
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.la_pharos.labrary",
+      "sha256_cert_fingerprints": [
+        "F7:44:01:C7:3C:8C:D3:DF:4E:35:23:91:FB:72:77:06:D4:DF:C7:9B:A6:05:EA:A3:07:FC:11:E3:F0:BA:0C:AE"
+      ]
+    }
+  }
+]

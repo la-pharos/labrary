@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:dayverse_book/utils/level_utils.dart';
 import 'package:dayverse_book/widget/ad_banner_placeholder.dart';
-
+import 'package:dayverse_book/widget/card_box.dart';
 
 class LevelScreen extends StatelessWidget {
   final int totalRead;
@@ -42,7 +42,7 @@ class LevelScreen extends StatelessWidget {
           elevation: 0,
           centerTitle: true,
           title: Text(
-            "LEVEL",
+            "레벨",
             style: TextStyle(
               color: Colors.white,
               fontFamily: 'kopub',
@@ -75,25 +75,7 @@ class LevelScreen extends StatelessWidget {
                       children: levels.map((level) => _buildLevelRow(level, screenWidth)).toList(),
                     ),
                     SizedBox(height: screenHeight * 0.03),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.local_fire_department, color: Colors.redAccent),
-                        SizedBox(width: screenWidth * 0.015),
-                        Flexible(
-                          child: Text(
-                            "110권부터 10권마다 레전드 그랄 단계가 추가됩니다!",
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontFamily: 'kopub',
-                              fontSize: descFontSize,
-                              fontWeight: FontWeight.bold,
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                        ),
-                      ],
-                    ),
+
                     SizedBox(height: screenHeight * 0.05), // 콘텐츠 마무리 여백
                   ],
                 ),
@@ -113,25 +95,27 @@ class LevelScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildCurrentLevelCard(double screenWidth, double padding, double margin, double levelFontSize, double descFontSize, double progressFontSize) {
-    double progress = ((totalRead - currentLevel.start) /
-        (currentLevel.end - currentLevel.start + 1))
-        .clamp(0.0, 1.0);
+  Widget _buildCurrentLevelCard(
+      double screenWidth,
+      double padding,
+      double margin,
+      double levelFontSize,
+      double descFontSize,
+      double progressFontSize,
+      ) {
+    final double progress =
+    LevelUtils.getLevelProgress(totalRead);
 
-    return Container(
-      padding: EdgeInsets.all(padding),
+    return CardBox(
       margin: EdgeInsets.only(bottom: margin),
-      decoration: BoxDecoration(
-        color: Colors.white10,
-        borderRadius: BorderRadius.circular(16),
-      ),
+      padding: EdgeInsets.all(padding),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              LevelUtils.buildShieldIcon(currentLevel),
+              LevelUtils.buildLevelIcon(currentLevel),
               SizedBox(width: screenWidth * 0.02),
               Text(
                 currentLevel.name,
@@ -144,7 +128,9 @@ class LevelScreen extends StatelessWidget {
               ),
             ],
           ),
+
           SizedBox(height: margin * 0.45),
+
           Text(
             currentLevel.description,
             textAlign: TextAlign.center,
@@ -154,7 +140,9 @@ class LevelScreen extends StatelessWidget {
               fontSize: descFontSize,
             ),
           ),
+
           SizedBox(height: margin * 0.8),
+
           LinearProgressIndicator(
             value: progress,
             backgroundColor: Colors.white24,
@@ -162,7 +150,9 @@ class LevelScreen extends StatelessWidget {
             minHeight: screenWidth * 0.02,
             borderRadius: BorderRadius.circular(10),
           ),
+
           SizedBox(height: margin * 0.4),
+
           Text(
             "다음 레벨까지 $booksToNext권 남음",
             style: TextStyle(
@@ -176,23 +166,30 @@ class LevelScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildLevelRow(LevelInfo level, double screenWidth) {
+  Widget _buildLevelRow(
+      LevelInfo level,
+      double screenWidth,
+      ) {
     final fontSize = screenWidth * 0.04;
     final descFontSize = screenWidth * 0.032;
     final verticalMargin = screenWidth * 0.03;
 
-    return Container(
-      margin: EdgeInsets.only(bottom: verticalMargin),
-      padding: EdgeInsets.all(screenWidth * 0.03),
-      decoration: BoxDecoration(
-        color: Colors.white10,
-        borderRadius: BorderRadius.circular(12),
+    return CardBox(
+      margin: EdgeInsets.only(
+        bottom: verticalMargin,
+      ),
+      padding: EdgeInsets.all(
+        screenWidth * 0.03,
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          LevelUtils.buildShieldIcon(level),
-          SizedBox(width: screenWidth * 0.03),
+          LevelUtils.buildLevelIcon(level),
+
+          SizedBox(
+            width: screenWidth * 0.03,
+          ),
+
           Expanded(
             flex: 2,
             child: Column(
@@ -207,9 +204,13 @@ class LevelScreen extends StatelessWidget {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                SizedBox(height: screenWidth * 0.01),
+
+                SizedBox(
+                  height: screenWidth * 0.01,
+                ),
+
                 Text(
-                  "${level.start}~${level.end}권",
+                  level.rangeText,
                   style: TextStyle(
                     color: Colors.white70,
                     fontFamily: 'kopub',
@@ -219,6 +220,11 @@ class LevelScreen extends StatelessWidget {
               ],
             ),
           ),
+
+          SizedBox(
+            width: screenWidth * 0.02,
+          ),
+
           Expanded(
             flex: 3,
             child: Text(

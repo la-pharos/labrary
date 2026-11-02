@@ -1,38 +1,51 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:provider/provider.dart';
+
 import 'package:dayverse_book/provider/user_data_provider.dart';
-import 'dart:io'; // ← 플랫폼 감지를 위해 필요
-import 'package:flutter/foundation.dart'; // ← 이거 있어야 kReleaseMode 사용 가능
 
 String getBannerAdUnitId(AdSize adSize) {
+  // 디버그 모드: Google 테스트 광고 ID 사용
   if (!kReleaseMode) {
-    // ✅ 테스트 중엔 Google 테스트용 ID 사용
-    return 'ca-app-pub-3940256099942544/6300978111';
+    if (Platform.isAndroid) {
+      return 'ca-app-pub-3940256099942544/6300978111';
+    }
+
+    if (Platform.isIOS) {
+      return 'ca-app-pub-3940256099942544/2934735716';
+    }
   }
 
+  // Android 운영 광고 ID
   if (Platform.isAndroid) {
     if (adSize == AdSize.largeBanner) {
-      return 'ca-app-pub-2078077942593061/3929139084'; // BottomAdLargeBannerBar
-    } else {
-      return 'ca-app-pub-2078077942593061/5792885098'; // BottomAdBannerBar
+      return 'ca-app-pub-2078077942953061/3929139084';
     }
-  } else if (Platform.isIOS) {
-    if (adSize == AdSize.largeBanner) {
-      return 'YOUR_IOS_AD_UNIT_ID_FOR_LARGE_BANNER';
-    } else {
-      return 'YOUR_IOS_AD_UNIT_ID_FOR_BANNER';
-    }
+
+    return 'ca-app-pub-2078077942953061/5792885098';
   }
-  return '';
+
+  // iOS 운영 광고 ID
+  if (Platform.isIOS) {
+    if (adSize == AdSize.largeBanner) {
+      return 'ca-app-pub-2078077942953061/7481411488';
+    }
+
+    return 'ca-app-pub-2078077942953061/1924842796';
+  }
+
+  throw UnsupportedError('지원하지 않는 플랫폼입니다.');
 }
 
 class AdBannerPlaceholder extends StatefulWidget {
-  final AdSize adSize; // ✅ 추가
+  final AdSize adSize;
 
   const AdBannerPlaceholder({
     super.key,
-    this.adSize = AdSize.banner, // 기본값은 일반 banner
+    this.adSize = AdSize.banner,
   });
 
   @override
@@ -42,17 +55,26 @@ class AdBannerPlaceholder extends StatefulWidget {
 class _AdBannerPlaceholderState extends State<AdBannerPlaceholder> {
   BannerAd? _bannerAd;
   bool _isLoaded = false;
+  bool _shouldShowAd = true;
 
   @override
   void initState() {
     super.initState();
 
+    // ✅ 프리미엄이면 광고 로드 자체를 하지 않음 (이벤트 프리미엄 포함)
+    final userData = context.read<UserDataProvider>();
+    _shouldShowAd = !userData.isPremiumActive;
+    if (!_shouldShowAd) return;
+
     _bannerAd = BannerAd(
-      adUnitId: getBannerAdUnitId(widget.adSize), // ✅ 이걸로 변경
+      adUnitId: getBannerAdUnitId(widget.adSize),
       request: const AdRequest(),
-      size: widget.adSize, // ✅ 여기에 반영
+      size: widget.adSize,
       listener: BannerAdListener(
-        onAdLoaded: (_) => setState(() => _isLoaded = true),
+        onAdLoaded: (_) {
+          if (!mounted) return;
+          setState(() => _isLoaded = true);
+        },
         onAdFailedToLoad: (ad, error) {
           ad.dispose();
           debugPrint('Ad failed to load: $error');
@@ -67,11 +89,16 @@ class _AdBannerPlaceholderState extends State<AdBannerPlaceholder> {
     super.dispose();
   }
 
-  @override
   Widget build(BuildContext context) {
-    final isSubscribed = context.watch<UserDataProvider>().isSubscribed;
-    if (isSubscribed) return const SizedBox.shrink();
-    if (!_isLoaded) return SizedBox(height: widget.adSize.height.toDouble());
+    final isPremium =
+        context.watch<UserDataProvider>().isPremiumActive;
+
+    if (isPremium ||
+        !_shouldShowAd ||
+        !_isLoaded ||
+        _bannerAd == null) {
+      return const SizedBox.shrink();
+    }
 
     return SizedBox(
       height: widget.adSize.height.toDouble(),
@@ -81,19 +108,17 @@ class _AdBannerPlaceholderState extends State<AdBannerPlaceholder> {
   }
 }
 
-
 /// ✅ 광고 섹션 전체를 Row + Padding으로 감싸서 재사용 가능하게!
 Widget buildAdSection(BuildContext context, double screenHeight) {
-  final isSubscribed = context.watch<UserDataProvider>().isSubscribed;
-
-  if (isSubscribed) return const SizedBox.shrink();
+  final isPremium = context.watch<UserDataProvider>().isPremiumActive;
+  if (isPremium) return const SizedBox.shrink();
 
   return Padding(
     padding: EdgeInsets.symmetric(vertical: screenHeight * 0.005),
-    child: Row(
+    child: const Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        const AdBannerPlaceholder(),
+        AdBannerPlaceholder(),
       ],
     ),
   );
@@ -111,19 +136,37 @@ class AdMediumRectanglePlaceholder extends StatefulWidget {
 class _AdMediumRectanglePlaceholderState extends State<AdMediumRectanglePlaceholder> {
   BannerAd? _bannerAd;
   bool _isLoaded = false;
+  bool _shouldShowAd = true;
 
   @override
   void initState() {
     super.initState();
 
+    // ✅ 프리미엄이면 로드 자체를 하지 않음
+    final userData = context.read<UserDataProvider>();
+    _shouldShowAd = !userData.isPremiumActive;
+    if (!_shouldShowAd) return;
+
     _bannerAd = BannerAd(
-      adUnitId: getBannerAdUnitId(AdSize.mediumRectangle), // ✅ 이걸로 변경
+      adUnitId: getBannerAdUnitId(AdSize.mediumRectangle),
       request: const AdRequest(),
-      size: AdSize.mediumRectangle, // ✅ 300x250
+      size: AdSize.mediumRectangle,
       listener: BannerAdListener(
-        onAdLoaded: (_) => setState(() => _isLoaded = true),
+        onAdLoaded: (_) {
+          if (!mounted) return;
+          setState(() => _isLoaded = true);
+        },
         onAdFailedToLoad: (ad, error) {
           ad.dispose();
+
+          if (!mounted) return;
+
+          setState(() {
+            _bannerAd = null;
+            _isLoaded = false;
+            _shouldShowAd = false;
+          });
+
           debugPrint('Ad failed to load: $error');
         },
       ),
@@ -138,8 +181,9 @@ class _AdMediumRectanglePlaceholderState extends State<AdMediumRectanglePlacehol
 
   @override
   Widget build(BuildContext context) {
-    final isSubscribed = context.watch<UserDataProvider>().isSubscribed;
-    if (isSubscribed) return const SizedBox.shrink();
+    final isPremium = context.watch<UserDataProvider>().isPremiumActive;
+    if (isPremium || !_shouldShowAd) return const SizedBox.shrink();
+
     if (!_isLoaded) return const SizedBox(height: 250);
 
     return SizedBox(
@@ -151,13 +195,13 @@ class _AdMediumRectanglePlaceholderState extends State<AdMediumRectanglePlacehol
 }
 
 Widget buildMediumAdSection(BuildContext context) {
-  final isSubscribed = context.watch<UserDataProvider>().isSubscribed;
-  if (isSubscribed) return const SizedBox.shrink();
+  final isPremium = context.watch<UserDataProvider>().isPremiumActive;
+  if (isPremium) return const SizedBox.shrink();
 
-  return Center(
+  return const Center(
     child: Padding(
-      padding: const EdgeInsets.symmetric(vertical: 16),
-      child: const AdMediumRectanglePlaceholder(),
+      padding: EdgeInsets.symmetric(vertical: 16),
+      child: AdMediumRectanglePlaceholder(),
     ),
   );
 }
@@ -169,11 +213,11 @@ class BottomAdBannerBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isSubscribed = context.watch<UserDataProvider>().isSubscribed;
+    final isPremium = context.watch<UserDataProvider>().isPremiumActive;
     final screenWidth = MediaQuery.of(context).size.width;
     final screenHeight = MediaQuery.of(context).size.height;
 
-    if (isSubscribed) return const SizedBox.shrink();
+    if (isPremium) return const SizedBox.shrink();
 
     return Align(
       alignment: Alignment.bottomCenter,
@@ -204,11 +248,11 @@ class BottomAdLargeBannerBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isSubscribed = context.watch<UserDataProvider>().isSubscribed;
+    final isPremium = context.watch<UserDataProvider>().isPremiumActive;
     final screenWidth = MediaQuery.of(context).size.width;
     final screenHeight = MediaQuery.of(context).size.height;
 
-    if (isSubscribed) return const SizedBox.shrink();
+    if (isPremium) return const SizedBox.shrink();
 
     return Align(
       alignment: Alignment.bottomCenter,
@@ -222,11 +266,9 @@ class BottomAdLargeBannerBar extends StatelessWidget {
           child: Container(
             width: double.infinity,
             color: const Color(0xFF013328).withOpacity(0.8),
-            padding: EdgeInsets.symmetric(vertical: screenHeight * 0.02), // ✅ 더 큰 padding
+            padding: EdgeInsets.symmetric(vertical: screenHeight * 0.02),
             child: const Center(
-              child: AdBannerPlaceholder(
-                adSize: AdSize.largeBanner // ✅ 광고 크기만 다르게
-              ),
+              child: AdBannerPlaceholder(adSize: AdSize.largeBanner),
             ),
           ),
         ),
@@ -234,12 +276,12 @@ class BottomAdLargeBannerBar extends StatelessWidget {
     );
   }
 }
+
 /// =======================================================================
-
-
 /// 광고배너 크기 (너비, 높이)
-// AdSize.banner	320	50
-// AdSize.largeBanner	320	100
-// AdSize.mediumRectangle	300	250 네모 광고, 일반적으로 리스트 중간 삽입용
-// AdSize.fullBanner	468	60 태블릿용
-// AdSize.leaderboard	728	90 가로형, 큰 화면용
+/// AdSize.banner           320 x 50
+/// AdSize.largeBanner      320 x 100
+/// AdSize.mediumRectangle  300 x 250 (리스트 중간 삽입용)
+/// AdSize.fullBanner       468 x 60  (태블릿용)
+/// AdSize.leaderboard      728 x 90  (큰 화면용)
+

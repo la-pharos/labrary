@@ -1,0 +1,724 @@
+
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0"
+    >
+    <meta name="theme-color" content="#F8F8F5">
+
+    <title>돈을 읽는 법 II - 자산의 사고방식 | Labrary</title>
+
+    <meta
+            name="description"
+            content="Labrary에서 새로운 독서 챌린지에 참여해보세요."
+    >
+
+    <!-- Open Graph -->
+    
+    
+    
+    
+
+    <style>
+        /* =====================================
+           DESIGN TOKENS
+        ===================================== */
+
+        :root {
+          --background: #F8F8F5;
+          --green: #153D30;
+          --text: #172C23;
+          --muted: #7F8881;
+          --accent: #527F67;
+          --lime: #D8F29B;
+        }
+
+        * {
+          box-sizing: border-box;
+        }
+
+        html {
+          -webkit-text-size-adjust: 100%;
+        }
+
+        body {
+          margin: 0;
+          min-height: 100vh;
+          min-height: 100dvh;
+
+          background: var(--background);
+          color: var(--text);
+
+          font-family:
+            -apple-system,
+            BlinkMacSystemFont,
+            "Apple SD Gothic Neo",
+            "Noto Sans KR",
+            sans-serif;
+
+          -webkit-font-smoothing: antialiased;
+        }
+
+        /* =====================================
+           PAGE
+        ===================================== */
+
+        .page {
+          width: 100%;
+          max-width: 480px;
+
+          min-height: 100vh;
+          min-height: 100dvh;
+
+          margin: 0 auto;
+
+          padding:
+            max(env(safe-area-inset-top), 28px)
+            24px
+            max(env(safe-area-inset-bottom), 30px);
+
+          display: flex;
+          flex-direction: column;
+        }
+
+        /* =====================================
+           HEADER
+        ===================================== */
+
+        header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+        }
+
+        .logo {
+          color: var(--green);
+          font-size: 25px;
+          font-weight: 800;
+          letter-spacing: -1.3px;
+        }
+
+        .header-slogan {
+          color: #829088;
+          font-size: 9px;
+          letter-spacing: 1px;
+          white-space: nowrap;
+        }
+
+        /* =====================================
+           MAIN
+        ===================================== */
+
+        .main {
+          flex: 1;
+
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+
+          padding: 45px 0 35px;
+        }
+
+        .eyebrow {
+          color: var(--accent);
+          font-size: 11px;
+          font-weight: 750;
+          letter-spacing: 2.3px;
+        }
+
+        h1 {
+          margin: 18px 0 14px;
+
+          color: var(--text);
+
+          font-size: clamp(32px, 8vw, 43px);
+          font-weight: 800;
+          line-height: 1.32;
+          letter-spacing: -1.8px;
+
+          word-break: keep-all;
+        }
+
+        .subtitle {
+          color: var(--muted);
+          font-size: 14px;
+          line-height: 1.8;
+          word-break: keep-all;
+        }
+
+        /* =====================================
+           CHALLENGE CARD
+        ===================================== */
+
+        .challenge-card {
+          margin-top: 32px;
+          padding: 25px 23px 22px;
+
+          background: var(--green);
+          color: #FFFFFF;
+
+          border-radius: 24px;
+          border: 1px solid rgba(255, 255, 255, 0.07);
+
+          box-shadow:
+            0 12px 28px rgba(21, 61, 48, 0.12);
+        }
+
+        .card-top {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+        }
+
+        .card-brand {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          min-width: 0;
+        }
+
+        .challenge-badge {
+          display: inline-flex;
+          align-items: center;
+
+          padding: 6px 9px;
+          border-radius: 100px;
+
+          background: var(--lime);
+          color: var(--green);
+
+          font-size: 10px;
+          font-weight: 800;
+          letter-spacing: 0.5px;
+          white-space: nowrap;
+        }
+
+        .card-caption {
+          color: #B5C8BB;
+          font-size: 10px;
+          letter-spacing: 0.6px;
+        }
+
+        .card-book-icon {
+          flex-shrink: 0;
+          width: 25px;
+          height: 25px;
+        }
+
+        .card-content {
+          padding: 34px 0 26px;
+        }
+
+        .challenge-card h2 {
+          margin: 0;
+
+          color: #FFFFFF;
+
+          font-size: 25px;
+          font-weight: 800;
+          line-height: 1.4;
+          letter-spacing: -0.7px;
+
+          word-break: keep-all;
+        }
+
+        .challenge-description {
+          margin: 11px 0 0;
+
+          color: #D3E0D5;
+
+          font-size: 14px;
+          line-height: 1.7;
+
+          word-break: keep-all;
+        }
+
+        .card-bottom {
+          border-top: 1px solid rgba(255, 255, 255, 0.16);
+          padding-top: 17px;
+
+          display: flex;
+          align-items: flex-start;
+          gap: 10px;
+
+          color: #E5EEDC;
+          font-size: 13px;
+          line-height: 1.6;
+        }
+
+        .goal-icon {
+          flex-shrink: 0;
+          width: 19px;
+          height: 19px;
+          margin-top: 1px;
+        }
+
+        /* =====================================
+           STORE BUTTONS - FINAL
+        ===================================== */
+
+        .download-row {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 12px;
+          margin-top: 20px;
+        }
+
+        .store-button {
+          min-width: 0;
+          min-height: 86px;
+          padding: 18px;
+
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+
+          background: #FFFFFF;
+          border: 1px solid #D7DDD6;
+          border-radius: 19px;
+
+          color: var(--green);
+          text-decoration: none;
+
+          transition:
+            transform 0.16s ease,
+            box-shadow 0.16s ease,
+            opacity 0.16s ease;
+        }
+
+        .store-button:hover {
+          box-shadow:
+            0 7px 20px rgba(21, 61, 48, 0.07);
+          border-color: #B6C8BA;
+        }
+
+        .store-button:active {
+          transform: scale(0.98);
+          opacity: 0.85;
+        }
+
+        .store-text {
+          display: flex;
+          flex-direction: column;
+          gap: 5px;
+        }
+
+        .store-title-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+        }
+
+        .store-text strong {
+          font-size: 16px;
+          font-weight: 750;
+          line-height: 1.3;
+          letter-spacing: -0.3px;
+          white-space: nowrap;
+        }
+
+        .store-text > span {
+          color: var(--muted);
+          font-size: 12px;
+          line-height: 1.4;
+        }
+
+        .external-icon {
+          flex-shrink: 0;
+          color: #718C7A;
+          font-size: 21px;
+          line-height: 1;
+        }
+
+        /* =====================================
+           LOADING / ERROR
+        ===================================== */
+
+        .loading {
+          padding: 25px 0;
+          color: var(--muted);
+          font-size: 14px;
+        }
+
+        .error {
+          color: #FFFFFF;
+          font-size: 14px;
+          line-height: 1.8;
+          word-break: keep-all;
+        }
+
+        .hidden {
+          display: none !important;
+        }
+
+        /* =====================================
+           FOOTER
+        ===================================== */
+
+        .footer {
+          padding-top: 14px;
+
+          text-align: center;
+
+          color: #9AA69D;
+          font-size: 12px;
+          letter-spacing: 0.2px;
+        }
+
+        /* =====================================
+           MOBILE
+        ===================================== */
+
+        @media (max-width: 420px) {
+          .page {
+            padding-left: 20px;
+            padding-right: 20px;
+          }
+
+          h1 {
+            font-size: 33px;
+          }
+
+          .challenge-card {
+            margin-top: 29px;
+            padding: 22px 19px 20px;
+            border-radius: 21px;
+          }
+
+          .card-brand {
+            gap: 7px;
+          }
+
+          .card-caption {
+            font-size: 9px;
+          }
+
+          .card-content {
+            padding: 28px 0 23px;
+          }
+
+          .challenge-card h2 {
+            font-size: 22px;
+          }
+
+          .download-row {
+            gap: 10px;
+          }
+
+          .store-button {
+            min-height: 80px;
+            padding: 14px;
+            border-radius: 16px;
+          }
+
+          .store-text strong {
+            font-size: 15px;
+          }
+        }
+
+        @media (max-width: 350px) {
+          .card-caption {
+            display: none;
+          }
+
+          .store-text strong {
+            font-size: 14px;
+          }
+        }
+
+        @media (max-height: 700px) {
+          .main {
+            justify-content: flex-start;
+            padding-top: 35px;
+          }
+
+          .challenge-card {
+            margin-top: 24px;
+          }
+
+          .download-row {
+            margin-top: 18px;
+          }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .store-button {
+            transition: none;
+          }
+        }
+    </style>
+
+  <!-- Dynamic Open Graph -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Labrary">
+  <meta property="og:title" content="돈을 읽는 법 II - 자산의 사고방식 | Labrary">
+  <meta property="og:description" content="월급을 버는 것에서 자산을 만드는 사고로 넘어가보세요.">
+  <meta property="og:url" content="https://la-pharos.web.app/challenge/reading_money_2">
+  <meta property="og:image" content="https://la-pharos.web.app/og/reading_money_2.png">
+  <meta property="og:image:secure_url" content="https://la-pharos.web.app/og/reading_money_2.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="돈을 읽는 법 II - 자산의 사고방식">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="돈을 읽는 법 II - 자산의 사고방식 | Labrary">
+  <meta name="twitter:description" content="월급을 버는 것에서 자산을 만드는 사고로 넘어가보세요.">
+  <meta name="twitter:image" content="https://la-pharos.web.app/og/reading_money_2.png">
+
+  <link rel="canonical" href="https://la-pharos.web.app/challenge/reading_money_2">
+
+</head>
+
+<body>
+<div class="page">
+
+    <!-- HEADER -->
+    <header>
+        <div class="logo">Labrary.</div>
+        <div class="header-slogan">
+            READ. CHALLENGE. GROW.
+        </div>
+    </header>
+
+    <!-- MAIN -->
+    <main class="main">
+
+        <div class="eyebrow">
+            READING CHALLENGE
+        </div>
+
+        <h1>
+            이번 독서 챌린지에<br>
+            참여해보세요.
+        </h1>
+
+        <div class="subtitle">
+            한 번의 도전이 새로운 시작이 되도록.
+        </div>
+
+        <!-- LOADING -->
+        <div id="loading" class="loading">
+            챌린지를 불러오는 중이에요.
+        </div>
+
+        <!-- CHALLENGE CARD -->
+        <section
+                id="challenge"
+                class="challenge-card hidden"
+        >
+            <div class="card-top">
+                <div class="card-brand">
+            <span class="challenge-badge">
+              CHALLENGE
+            </span>
+                    <span class="card-caption">
+              LABRARY READING
+            </span>
+                </div>
+
+                <!-- Book icon -->
+                <svg
+                        class="card-book-icon"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="#D8F29B"
+                        stroke-width="1.8"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        aria-hidden="true"
+                >
+                    <path d="M12 6.5c-2-1.5-5.2-2-9-1.5v13c3.8-.5 7 .1 9 1.5"/>
+                    <path d="M12 6.5c2-1.5 5.2-2 9-1.5v13c-3.8-.5-7 .1-9 1.5"/>
+                    <path d="M12 6.5v13"/>
+                </svg>
+            </div>
+
+            <div class="card-content">
+                <h2 id="challengeTitle"></h2>
+                <p
+                        class="challenge-description"
+                        id="challengeDescription"
+                ></p>
+            </div>
+
+            <div
+                    class="card-bottom"
+                    id="goalBox"
+            >
+                <!-- Circle check icon -->
+                <svg
+                        class="goal-icon"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="#D8F29B"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        aria-hidden="true"
+                >
+                    <circle cx="12" cy="12" r="9"/>
+                    <path d="m8 12 2.5 2.5L16 9"/>
+                </svg>
+                <span id="challengeGoal"></span>
+            </div>
+        </section>
+
+        <!-- ERROR -->
+        <section
+                id="error"
+                class="challenge-card error hidden"
+                role="alert"
+        >
+            챌린지를 찾을 수 없습니다.<br>
+            종료되었거나 현재 공개되지 않은 챌린지일 수 있어요.
+        </section>
+
+        <!-- STORE DOWNLOAD BUTTONS -->
+        <div class="download-row">
+
+            <!-- APP STORE -->
+            <a
+                    class="store-button"
+                    href="https://apps.apple.com/kr/app/id6758513187"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="App Store에서 Labrary 다운로드"
+            >
+                <div class="store-text">
+                    <div class="store-title-row">
+                        <strong>App Store</strong>
+                        <span class="external-icon" aria-hidden="true">↗</span>
+                    </div>
+                    <span>다운로드</span>
+                </div>
+            </a>
+
+            <!-- GOOGLE PLAY -->
+            <a
+                    class="store-button"
+                    href="https://play.google.com/store/apps/details?id=com.la_pharos.labrary"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="Google Play에서 Labrary 다운로드"
+            >
+                <div class="store-text">
+                    <div class="store-title-row">
+                        <strong>Google Play</strong>
+                        <span class="external-icon" aria-hidden="true">↗</span>
+                    </div>
+                    <span>다운로드</span>
+                </div>
+            </a>
+
+        </div>
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="footer">
+        Read. Challenge. Grow.
+    </footer>
+</div>
+
+<!-- CHALLENGE DATA LOADER -->
+<script>
+    const segments = window.location.pathname
+      .split("/")
+      .filter(Boolean);
+
+    const challengeId =
+      segments.length === 2 &&
+      segments[0] === "challenge"
+        ? segments[1]
+        : null;
+
+    const $ = (id) =>
+      document.getElementById(id);
+
+    function showError() {
+      $("loading").classList.add("hidden");
+      $("challenge").classList.add("hidden");
+      $("error").classList.remove("hidden");
+    }
+
+    async function loadChallenge() {
+      if (!challengeId) {
+        showError();
+        return;
+      }
+
+      try {
+        const response = await fetch(
+          "/challenges.json",
+          { cache: "no-cache" }
+        );
+
+        if (!response.ok) {
+          throw new Error("Failed to load challenges");
+        }
+
+        const challenges = await response.json();
+
+        if (!Array.isArray(challenges)) {
+          throw new Error("Invalid challenge data");
+        }
+
+        const challenge = challenges.find(
+          (item) =>
+            item.id === challengeId &&
+            item.isCustom !== true &&
+            item.isArchived !== true
+        );
+
+        if (!challenge) {
+          showError();
+          return;
+        }
+
+        // 챌린지 제목
+        $("challengeTitle").textContent =
+          challenge.title || "독서 챌린지";
+
+        // 한 줄 설명
+        $("challengeDescription").textContent =
+          challenge.shortDescription || "";
+
+        // 챌린지 목표
+        const goal =
+          challenge.goalDisplayText ||
+          challenge.goalDescription ||
+          "";
+
+        $("challengeGoal").textContent = goal;
+
+        if (!goal.trim()) {
+          $("goalBox").classList.add("hidden");
+        } else {
+          $("goalBox").classList.remove("hidden");
+        }
+
+        // 브라우저 제목
+        document.title =
+          `${challenge.title} | Labrary`;
+
+        // 화면 표시
+        $("loading").classList.add("hidden");
+        $("error").classList.add("hidden");
+        $("challenge").classList.remove("hidden");
+
+      } catch (error) {
+        console.error("Challenge loading failed:", error);
+        showError();
+      }
+    }
+
+    loadChallenge();
+</script>
+</body>
+</html>

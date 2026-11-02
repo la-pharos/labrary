@@ -2,17 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:flutter/services.dart';
-import 'package:dayverse_book/service/user_data_loader.dart'; // ✅ 추가
 import 'package:provider/provider.dart';
+import 'package:flutter/services.dart';
 
+import 'package:dayverse_book/service/user_data_loader.dart';
 import 'package:dayverse_book/provider/challenge_provider.dart';
 import 'package:dayverse_book/provider/saved_books_provider.dart';
 import 'package:dayverse_book/provider/custom_library_provider.dart';
 import 'package:dayverse_book/provider/user_data_provider.dart';
-import 'package:country_picker/country_picker.dart';
-
-
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:dayverse_book/service/signup_service.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
@@ -22,29 +21,26 @@ class SignupScreen extends StatefulWidget {
 }
 
 class _SignupScreenState extends State<SignupScreen> {
+
   final emailController = TextEditingController();
   final nicknameController = TextEditingController();
   final passwordController = TextEditingController();
   final confirmPasswordController = TextEditingController();
-  final phoneController = TextEditingController();
-  final otpController = TextEditingController();
-  String? _verificationId;
-  bool _otpSent = false;
-  bool _phoneVerified = false;
+
+  // ✅ 포커스 노드 4개
+  final _emailFocus = FocusNode();
+  final _nicknameFocus = FocusNode();
+  final _pwFocus = FocusNode();
+  final _pw2Focus = FocusNode();
 
   bool _obscurePassword = true;
 
   bool? _isNicknameAvailable;
   bool? _isEmailAvailable;
 
-  String _selectedCountryCode = '+82';
-  String _selectedCountryName = 'South Korea';
-
-  PhoneAuthCredential? _cachedPhoneCredential;
-
   bool isSubmitting = false;
-  final emailRegex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
 
+  final emailRegex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
 
   @override
   void dispose() {
@@ -52,59 +48,13 @@ class _SignupScreenState extends State<SignupScreen> {
     nicknameController.dispose();
     passwordController.dispose();
     confirmPasswordController.dispose();
-    phoneController.dispose();
-    otpController.dispose();
+
+    _emailFocus.dispose();
+    _nicknameFocus.dispose();
+    _pwFocus.dispose();
+    _pw2Focus.dispose();
+
     super.dispose();
-  }
-
-  Future<void> _sendOtp() async {
-    final phone = phoneController.text.trim();
-    final fullPhoneNumber = '$_selectedCountryCode$phone';
-
-    // 🔒 전화번호 중복 확인 먼저!
-    final duplicate = await _isPhoneTaken(fullPhoneNumber); // +821012345678로 확인
-    if (duplicate) {
-      _showError("이미 사용 중인 전화번호입니다.");
-      return;
-    }
-
-    // 🔐 Firebase OTP 전송
-    FirebaseAuth.instance.verifyPhoneNumber(
-      phoneNumber: fullPhoneNumber,
-      codeSent: (verificationId, _) {
-        setState(() {
-          _verificationId = verificationId;
-          _otpSent = true;
-        });
-      },
-      verificationCompleted: (PhoneAuthCredential credential) async {
-        _phoneVerified = true;
-        setState(() {});
-      },
-      verificationFailed: (FirebaseAuthException e) {
-        _showError("전화번호 인증 실패: ${e.message}");
-      },
-      codeAutoRetrievalTimeout: (_) {},
-    );
-  }
-
-  Future<void> _verifyOtp() async {
-    try {
-      final cred = PhoneAuthProvider.credential(
-        verificationId: _verificationId!,
-        smsCode: otpController.text.trim(),
-      );
-
-      _cachedPhoneCredential = cred; // ✅ 저장만 해둔다
-
-      _phoneVerified = true;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("전화번호 인증이 완료되었습니다.")),
-      );
-      setState(() {});
-    } catch (e) {
-      _showError("인증번호가 올바르지 않습니다.");
-    }
   }
 
   bool _isPasswordValid(String password) {
@@ -129,7 +79,8 @@ class _SignupScreenState extends State<SignupScreen> {
               size: 18, color: isMet ? Colors.green : Colors.red),
           const SizedBox(width: 6),
           Text(text,
-              style: TextStyle(color: isMet ? Colors.green : Colors.red, fontSize: 13)),
+              style: TextStyle(
+                  color: isMet ? Colors.green : Colors.red, fontSize: 13)),
         ],
       );
     }
@@ -146,23 +97,94 @@ class _SignupScreenState extends State<SignupScreen> {
     );
   }
 
+  void _showError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  // ✅ 기존 _buildInput 확장: focusNode / formatter / action / submit 등 넣을 수 있게
+  Widget _buildInput(
+      String label,
+      TextEditingController controller, {
+        FocusNode? focusNode,
+        bool obscure = false,
+        VoidCallback? onChangedReset,
+        TextInputType? keyboardType,
+        TextInputAction? textInputAction,
+        VoidCallback? onEditingComplete,
+        ValueChanged<String>? onSubmitted,
+        List<TextInputFormatter>? inputFormatters,
+        Iterable<String>? autofillHints,
+        bool autocorrect = true,
+        bool enableSuggestions = true,
+      }) {
+    return TextField(
+      controller: controller,
+      focusNode: focusNode,
+      obscureText: obscure ? _obscurePassword : false,
+      keyboardType: keyboardType,
+      textInputAction: textInputAction,
+      onEditingComplete: onEditingComplete,
+      onSubmitted: onSubmitted,
+      autofillHints: autofillHints,
+      autocorrect: autocorrect,
+      enableSuggestions: enableSuggestions,
+      smartDashesType: SmartDashesType.disabled,
+      smartQuotesType: SmartQuotesType.disabled,
+      inputFormatters: inputFormatters,
+      onChanged: (_) {
+        setState(() {});
+        onChangedReset?.call();
+      },
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: const TextStyle(color: Colors.white70),
+        enabledBorder: const UnderlineInputBorder(
+          borderSide: BorderSide(color: Colors.white38),
+        ),
+        suffixIcon: obscure
+            ? IconButton(
+          icon: Icon(
+            _obscurePassword ? Icons.visibility_off : Icons.visibility,
+            color: Colors.white70,
+          ),
+          onPressed: () {
+            setState(() => _obscurePassword = !_obscurePassword);
+          },
+        )
+            : null,
+      ),
+      style: const TextStyle(color: Colors.white),
+    );
+  }
+
   Future<void> _signup() async {
-    setState(() => isSubmitting = true); // ✅ 로딩 시작
+    if (isSubmitting) return;
+    setState(() => isSubmitting = true);
 
     try {
       final email = emailController.text.trim();
       final nickname = nicknameController.text.trim();
       final password = passwordController.text.trim();
       final confirmPassword = confirmPasswordController.text.trim();
+
       final nicknameRegExp = RegExp(r'^[가-힣a-zA-Z0-9]{2,12}$');
 
-      if (!_phoneVerified) {
-        _showError("전화번호 인증이 필요합니다.");
+      if (email.isEmpty ||
+          nickname.isEmpty ||
+          password.isEmpty ||
+          confirmPassword.isEmpty) {
+        _showError("모든 항목을 입력해주세요.");
         return;
       }
 
-      if (email.isEmpty || nickname.isEmpty || password.isEmpty || phoneController.text.trim().isEmpty || otpController.text.trim().isEmpty) {
-        _showError("모든 항목을 입력해주세요.");
+      if (!emailRegex.hasMatch(email)) {
+        _showError("올바른 이메일 형식을 입력해주세요.");
+        return;
+      }
+
+      if (password != confirmPassword) {
+        _showError("비밀번호가 일치하지 않습니다.");
         return;
       }
 
@@ -176,483 +198,478 @@ class _SignupScreenState extends State<SignupScreen> {
         return;
       }
 
-      if (await _isNicknameTaken(nickname)) {
-        _showError("이미 사용 중인 닉네임입니다.");
+      if (_isEmailAvailable != true) {
+        _showError("이메일 중복확인을 완료해주세요.");
+        return;
+      }
+      if (_isNicknameAvailable != true) {
+        _showError("닉네임 중복확인을 완료해주세요.");
         return;
       }
 
-      if (await _isEmailTaken(email)) {
-        _showError("이미 사용 중인 이메일입니다.");
-        return;
-      }
-
-      if (await _isPhoneTaken(phoneController.text.trim())) {
-        _showError("이미 사용 중인 전화번호입니다.");
-        return;
-      }
 
       final currentUser = FirebaseAuth.instance.currentUser;
-      final credential = EmailAuthProvider.credential(email: email, password: password);
       UserCredential userCredential;
 
       if (currentUser != null && currentUser.isAnonymous) {
+        final credential =
+        EmailAuthProvider.credential(email: email, password: password);
         userCredential = await currentUser.linkWithCredential(credential);
-        print("✅ 익명 계정과 연동 완료: ${userCredential.user?.uid}");
+        debugPrint("✅ 익명 계정과 연동 완료: ${userCredential.user?.uid}");
       } else {
-        userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+        userCredential =
+        await FirebaseAuth.instance.createUserWithEmailAndPassword(
           email: email,
           password: password,
         );
-        print("✅ 새 계정 생성: ${userCredential.user?.uid}");
+        debugPrint("✅ 새 계정 생성: ${userCredential.user?.uid}");
       }
 
       final user = userCredential.user;
-
-      // ✅ 전화번호 연동
-      if (_cachedPhoneCredential != null) {
-        try {
-          await user?.linkWithCredential(_cachedPhoneCredential!);
-          print("✅ 전화번호 연동 성공");
-        } catch (e) {
-          print("⚠️ 전화번호 연동 실패: $e");
-        }
+      if (user == null) {
+        _showError("회원가입에 실패했습니다. 다시 시도해주세요.");
+        return;
       }
 
-      if (user != null) {
-        await user.reload();
-
-        await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
-          'email': user.email,
-          'nickname': nickname,
-          'bio': '',
-          'profileImageUrl': '',
-          'createdAt': Timestamp.now(),
-          'isPremium': false,
-          'phone': phoneController.text.trim(),
-        }, SetOptions(merge: true));
-
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setBool('justSignedUp', true);
-
-        await loadUserDataAfterLogin(
-          savedBooksProvider: context.read<SavedBooksProvider>(),
-          customLibraryProvider: context.read<CustomLibraryProvider>(),
-          challengeProvider: context.read<ChallengeProvider>(),
-          userDataProvider: context.read<UserDataProvider>(),
-        );
-
-        if (!mounted) return;
-
-        Navigator.pushNamedAndRemoveUntil(
-          context,
-          '/main',
-              (route) => false,
-          arguments: {'showWelcome': true},
-        );
+      if (!user.emailVerified) {
+        await user.sendEmailVerification();
+        debugPrint("📩 이메일 인증 메일 발송 완료");
       }
+
+      final nicknameNormalized =
+      await SignupService.instance.claimNickname(nickname);
+
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .set({
+        'email': user.email,
+        'nickname': nickname,
+        'nicknameNormalized': nicknameNormalized,
+        'bio': '',
+        'profileImageUrl': '',
+        'createdAt': FieldValue.serverTimestamp(),
+        'isPremium': false,
+        'phone': '',
+        'emailVerified': false,
+      }, SetOptions(merge: true));
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('justSignedUp', true);
+
+      if (!mounted) return;
+
+      Navigator.pushNamedAndRemoveUntil(
+        context,
+        '/verify_email',
+            (route) => false,
+      );
     } on FirebaseAuthException catch (e) {
       String message = '회원가입에 실패했습니다.';
-      if (e.code == 'email-already-in-use') {
+
+      if (e.code == 'email-already-in-use' ||
+          e.code == 'credential-already-in-use') {
         message = '이미 사용 중인 이메일입니다.';
       } else if (e.code == 'weak-password') {
         message = '비밀번호가 너무 약합니다.';
       } else if (e.code == 'invalid-credential') {
         message = '잘못된 인증 정보입니다.';
       }
+
       _showError(message);
+    } on FirebaseFunctionsException catch (e) {
+      debugPrint(
+        '🔥 회원가입 Functions 오류: ${e.code} / ${e.message}',
+      );
+
+      if (e.code == 'already-exists') {
+        if (mounted) {
+          setState(() {
+            _isNicknameAvailable = false;
+          });
+        }
+
+        _showError(
+          '이미 사용 중인 닉네임입니다. 다른 닉네임을 선택해주세요.',
+        );
+      } else if (e.code == 'permission-denied') {
+        if (mounted) {
+          setState(() {
+            _isNicknameAvailable = false;
+          });
+        }
+
+        _showError('사용할 수 없는 닉네임입니다.');
+      } else if (e.code == 'invalid-argument') {
+        if (mounted) {
+          setState(() {
+            _isNicknameAvailable = false;
+          });
+        }
+
+        _showError(
+          e.message ??
+              '닉네임은 2~12자, 한글/영문/숫자만 사용할 수 있습니다.',
+        );
+      } else if (e.code == 'unauthenticated') {
+        _showError('로그인 인증 정보를 확인할 수 없습니다.');
+      } else {
+        _showError(
+          e.message ?? '회원가입 처리 중 오류가 발생했습니다.',
+        );
+      }
+    } catch (e) {
+      debugPrint('🔥 signup unknown error: $e');
+      _showError('알 수 없는 오류가 발생했습니다.');
     } finally {
-      setState(() => isSubmitting = false); // ✅ 로딩 종료
+      if (mounted) {
+        setState(() => isSubmitting = false);
+      }
     }
   }
 
-  Future<bool> _isNicknameTaken(String nickname) async {
-    final snapshot = await FirebaseFirestore.instance
-        .collection('users')
-        .where('nickname', isEqualTo: nickname)
-        .get();
-    return snapshot.docs.isNotEmpty;
+
+  Future<void> _checkNicknameAvailability() async {
+    final nickname = nicknameController.text.trim();
+    final nicknameRegExp = RegExp(r'^[가-힣a-zA-Z0-9]{2,12}$');
+
+    if (!nicknameRegExp.hasMatch(nickname)) {
+      _showError('닉네임은 2~12자, 한글/영문/숫자만 사용할 수 있습니다.');
+      return;
+    }
+
+    try {
+      await _ensureAuthenticatedForSignup();
+
+      final available = await SignupService.instance
+          .checkNicknameAvailability(nickname);
+
+      if (!mounted) return;
+
+      setState(() {
+        _isNicknameAvailable = available;
+      });
+
+      _showError(
+        available
+            ? '사용 가능한 닉네임입니다.'
+            : '이미 사용 중인 닉네임입니다.',
+      );
+    } on FirebaseFunctionsException catch (e) {
+      debugPrint(
+        '❌ 닉네임 중복확인 실패: ${e.code} / ${e.message}',
+      );
+
+      if (mounted) {
+        setState(() {
+          _isNicknameAvailable = false;
+        });
+      }
+
+      if (e.code == 'permission-denied') {
+        _showError('사용할 수 없는 닉네임입니다.');
+      } else if (e.code == 'already-exists') {
+        _showError('이미 사용 중인 닉네임입니다.');
+      } else if (e.code == 'invalid-argument') {
+        _showError(
+          e.message ??
+              '닉네임은 2~12자, 한글/영문/숫자만 사용할 수 있습니다.',
+        );
+      } else {
+        _showError(
+          e.message ?? '닉네임 중복확인 중 오류가 발생했습니다.',
+        );
+      }
+    } catch (e) {
+      debugPrint('❌ 닉네임 중복확인 실패: $e');
+
+      if (mounted) {
+        setState(() {
+          _isNicknameAvailable = false;
+        });
+      }
+
+      _showError('닉네임 중복확인 중 오류가 발생했습니다.');
+    }
   }
 
-  void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  Future<void> _checkEmailAvailability() async {
+    final email = emailController.text.trim().toLowerCase();
+
+    if (email.isEmpty || !emailRegex.hasMatch(email)) {
+      _showError('올바른 이메일 형식을 입력해주세요.');
+      return;
+    }
+
+    try {
+      await _ensureAuthenticatedForSignup();
+
+      final available = await SignupService.instance
+          .checkEmailAvailability(email);
+
+      if (!mounted) return;
+
+      setState(() {
+        _isEmailAvailable = available;
+      });
+
+      _showError(
+        available
+            ? '사용 가능한 이메일입니다.'
+            : '이미 사용 중인 이메일입니다.',
+      );
+    } on FirebaseFunctionsException catch (e) {
+      debugPrint(
+        '❌ 이메일 중복확인 실패: ${e.code} / ${e.message}',
+      );
+
+      _showError(
+        e.message ?? '이메일 중복확인 중 오류가 발생했습니다.',
+      );
+    } catch (e) {
+      debugPrint('❌ 이메일 중복확인 실패: $e');
+      _showError('이메일 중복확인 중 오류가 발생했습니다.');
+    }
   }
 
-  Widget _buildInput(String label, TextEditingController controller,
-      {bool obscure = false}) {
-    return TextField(
-      controller: controller,
-      obscureText: obscure ? _obscurePassword : false,
-      onChanged: (_) => setState(() {}),
-      decoration: InputDecoration(
-        labelText: label,
-        labelStyle: const TextStyle(color: Colors.white70),
-        enabledBorder: const UnderlineInputBorder(
-          borderSide: BorderSide(color: Colors.white38),
-        ),
-        suffixIcon: obscure
-            ? IconButton(
-          icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility,
-              color: Colors.white70),
-          onPressed: () {
-            setState(() {
-              _obscurePassword = !_obscurePassword;
-            });
-          },
-        )
-            : null,
-      ),
-      style: const TextStyle(color: Colors.white),
-    );
+  Future<void> _ensureAuthenticatedForSignup() async {
+    if (FirebaseAuth.instance.currentUser == null) {
+      await FirebaseAuth.instance.signInAnonymously();
+      debugPrint('✅ 회원가입 중복확인용 익명 로그인 완료');
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final password = passwordController.text;
-    final screenHeight = MediaQuery.of(context).size.height;
-    final screenWidth = MediaQuery.of(context).size.width;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A1D27),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          return SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 21, vertical: 36),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                minHeight: constraints.maxHeight,
-              ),
-              child: IntrinsicHeight(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Text("회원가입", style: TextStyle(color: Colors.white, fontSize: 24, fontFamily: 'kopub')),
-                    const SizedBox(height: 30),
-                    Row(
-                      children: [
-                        Expanded(child: _buildInput("이메일", emailController)),
-                        const SizedBox(width: 8),
-                        ElevatedButton(
-                          onPressed: _checkEmailAvailability,
-                          style: ElevatedButton.styleFrom(backgroundColor: Colors.white),
-                          child: const Text("중복확인", style: TextStyle(color: Color(0xFF0A1D27), fontFamily: 'kopub')),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                    Row(
-                      children: [
-                        Expanded(child: _buildInput("닉네임", nicknameController)),
-                        const SizedBox(width: 8),
-                        ElevatedButton(
-                          onPressed: _checkNicknameAvailability,
-                          style: ElevatedButton.styleFrom(backgroundColor: Colors.white),
-                          child: const Text("중복확인", style: TextStyle(color: Color(0xFF0A1D27), fontFamily: 'kopub')),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    const Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        "닉네임은 2~12자, 한글/영문/숫자만 사용할 수 있습니다.",
-                        style: TextStyle(color: Colors.white54, fontSize: 12),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    _buildInput("비밀번호", passwordController, obscure: true),
-                    const SizedBox(height: 6),
-                    _buildPasswordConditions(password),
-                    const SizedBox(height: 20),
-                    _buildPhoneVerificationSection(),
-                    const SizedBox(height: 20),
-                    SizedBox(
-                      width: double.infinity,
-                      child: isSubmitting
-                          ? const Center(
-                        child: CircularProgressIndicator(
-                          valueColor: AlwaysStoppedAnimation<Color>(Colors.amberAccent),
-                        ),
-                      )
-                          : ElevatedButton(
-                        onPressed: _signup,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.amberAccent,
-                          padding: const EdgeInsets.symmetric(vertical: 16), // 더 터치하기 좋게
-                        ),
-                        child: const Text(
-                          "가입하기",
-                          style: TextStyle(
-                            color: Color(0xFF0A1D27),
-                            fontFamily: 'kopub',
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextButton(
-                      onPressed: () => Navigator.pushReplacementNamed(context, '/login'),
-                      child: const Text("이미 계정이 있으신가요?", style: TextStyle(color: Colors.white70)),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
+
+      // ✅ LoginScreen과 동일: Tab / Shift+Tab 포커스 이동 강제
+      body: Shortcuts(
+        shortcuts: <LogicalKeySet, Intent>{
+          LogicalKeySet(LogicalKeyboardKey.tab): const NextFocusIntent(),
+          LogicalKeySet(LogicalKeyboardKey.shift, LogicalKeyboardKey.tab):
+          const PreviousFocusIntent(),
         },
-      ),
-    );
-  }
-
-  Future<void> _checkNicknameAvailability() async {
-    final nickname = nicknameController.text.trim();
-    if (nickname.isEmpty) return;
-
-    final taken = await _isNicknameTaken(nickname);
-    setState(() {
-      _isNicknameAvailable = !taken;
-    });
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(taken ? "이미 사용 중인 닉네임입니다." : "사용 가능한 닉네임입니다.")),
-    );
-  }
-
-  Future<void> _checkEmailAvailability() async {
-    final email = emailController.text.trim();
-
-    // 🔐 1. 비어있거나 이메일 형식이 아니면 리턴
-    final emailRegex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
-    if (email.isEmpty || !emailRegex.hasMatch(email)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("올바른 이메일 형식을 입력해주세요.")),
-      );
-      return;
-    }
-
-    // 🔍 2. 이메일 중복 확인
-    final taken = await _isEmailTaken(email);
-    setState(() {
-      _isEmailAvailable = !taken;
-    });
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(taken ? "이미 사용 중인 이메일입니다." : "사용 가능한 이메일입니다.")),
-    );
-  }
-
-  Future<bool> _isEmailTaken(String email) async {
-    final snapshot = await FirebaseFirestore.instance
-        .collection('users')
-        .where('email', isEqualTo: email)
-        .get();
-    return snapshot.docs.isNotEmpty;
-  }
-
-  Future<bool> _isPhoneTaken(String phone) async {
-    final snapshot = await FirebaseFirestore.instance
-        .collection('users')
-        .where('phone', isEqualTo: phone)
-        .get();
-    return snapshot.docs.isNotEmpty;
-  }
-
-  Widget _buildPhoneVerificationSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // 전화번호 입력 + 인증 버튼 한 줄
-        Row(
-          children: [
-            // 국가번호 + 전화번호 입력
-            Expanded(
-              flex: 6,
-              child: Row(
-                children: [
-                  GestureDetector(
-                    onTap: _showCountryPickerBottomSheet,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-                      decoration: const BoxDecoration(
-                        border: Border(bottom: BorderSide(color: Colors.white38)),
-                      ),
-                      child: Row(
+        child: Actions(
+          actions: <Type, Action<Intent>>{
+            NextFocusIntent: CallbackAction<NextFocusIntent>(
+              onInvoke: (intent) {
+                FocusScope.of(context).nextFocus();
+                return null;
+              },
+            ),
+            PreviousFocusIntent: CallbackAction<PreviousFocusIntent>(
+              onInvoke: (intent) {
+                FocusScope.of(context).previousFocus();
+                return null;
+              },
+            ),
+          },
+          child: FocusTraversalGroup(
+            policy: WidgetOrderTraversalPolicy(),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                return SingleChildScrollView(
+                  padding:
+                  const EdgeInsets.symmetric(horizontal: 21, vertical: 36),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                    child: IntrinsicHeight(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Text(
-                            _selectedCountryCode,
-                            style: const TextStyle(color: Colors.white, fontSize: 16),
+
+                          Image.asset(
+                            'assets/image/logo_mark.png',
+                            height: MediaQuery.of(context).size.height * 0.16,
+                            fit: BoxFit.contain,
                           ),
-                          const Icon(Icons.arrow_drop_down, color: Colors.white),
+
+                          const Text("회원가입",
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 28,
+                                  fontFamily: 'kopub')),
+                          const SizedBox(height: 30),
+
+                          // ✅ 이메일 + 중복확인
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _buildInput(
+                                  "이메일",
+                                  emailController,
+                                  focusNode: _emailFocus,
+                                  keyboardType: TextInputType.emailAddress,
+                                  textInputAction: TextInputAction.next,
+                                  onEditingComplete: () => FocusScope.of(context)
+                                      .requestFocus(_nicknameFocus),
+                                  autofillHints: const [
+                                    AutofillHints.username,
+                                    AutofillHints.email
+                                  ],
+                                  autocorrect: false,
+                                  enableSuggestions: false,
+                                  inputFormatters: [
+                                    // ✅ 이메일은 ASCII만
+                                    FilteringTextInputFormatter.allow(
+                                        RegExp(r'[ -~]')),
+                                  ],
+                                  onChangedReset: () =>
+                                      setState(() => _isEmailAvailable = null),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              ElevatedButton(
+                                onPressed: _checkEmailAvailability,
+                                style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.white),
+                                child: const Text(
+                                  "중복확인",
+                                  style: TextStyle(
+                                      color: Color(0xFF0A1D27),
+                                      fontFamily: 'kopub'),
+                                ),
+                              ),
+                            ],
+                          ),
+
+                          const SizedBox(height: 20),
+
+                          // ✅ 닉네임 + 중복확인 (한글 허용)
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _buildInput(
+                                  "닉네임",
+                                  nicknameController,
+                                  focusNode: _nicknameFocus,
+                                  keyboardType: TextInputType.text,
+                                  textInputAction: TextInputAction.next,
+                                  onEditingComplete: () =>
+                                      FocusScope.of(context).requestFocus(_pwFocus),
+                                  onChangedReset: () =>
+                                      setState(() => _isNicknameAvailable = null),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              ElevatedButton(
+                                onPressed: _checkNicknameAvailability,
+                                style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.white),
+                                child: const Text(
+                                  "중복확인",
+                                  style: TextStyle(
+                                      color: Color(0xFF0A1D27),
+                                      fontFamily: 'kopub'),
+                                ),
+                              ),
+                            ],
+                          ),
+
+                          const SizedBox(height: 4),
+                          const Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              "닉네임은 2~12자, 한글/영문/숫자만 사용할 수 있습니다.",
+                              style:
+                              TextStyle(color: Colors.white54, fontSize: 12),
+                            ),
+                          ),
+
+                          const SizedBox(height: 20),
+
+                          // ✅ 비밀번호 (ASCII만)
+                          _buildInput(
+                            "비밀번호",
+                            passwordController,
+                            focusNode: _pwFocus,
+                            obscure: true,
+                            keyboardType: TextInputType.visiblePassword,
+                            textInputAction: TextInputAction.next,
+                            onEditingComplete: () =>
+                                FocusScope.of(context).requestFocus(_pw2Focus),
+                            autofillHints: const [AutofillHints.newPassword],
+                            autocorrect: false,
+                            enableSuggestions: false,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(RegExp(r'[ -~]')),
+                            ],
+                          ),
+
+                          const SizedBox(height: 6),
+                          _buildPasswordConditions(password),
+
+                          const SizedBox(height: 12),
+
+                          // ✅ 비밀번호 확인 (ASCII만) + Enter로 가입
+                          _buildInput(
+                            "비밀번호 확인",
+                            confirmPasswordController,
+                            focusNode: _pw2Focus,
+                            obscure: true,
+                            keyboardType: TextInputType.visiblePassword,
+                            textInputAction: TextInputAction.done,
+                            onSubmitted: (_) => _signup(),
+                            autofillHints: const [AutofillHints.newPassword],
+                            autocorrect: false,
+                            enableSuggestions: false,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(RegExp(r'[ -~]')),
+                            ],
+                          ),
+
+                          const SizedBox(height: 20),
+
+                          SizedBox(
+                            width: double.infinity,
+                            child: isSubmitting
+                                ? const Center(
+                              child: CircularProgressIndicator(
+                                valueColor:
+                                AlwaysStoppedAnimation<Color>(
+                                    Colors.amberAccent),
+                              ),
+                            )
+                                : ElevatedButton(
+                              onPressed: _signup,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.amberAccent,
+                                padding: const EdgeInsets.symmetric(
+                                    vertical: 16),
+                              ),
+                              child: const Text(
+                                "가입하기",
+                                style: TextStyle(
+                                  color: Color(0xFF0A1D27),
+                                  fontFamily: 'kopub',
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+
+                          const SizedBox(height: 12),
+                          TextButton(
+                            onPressed: () =>
+                                Navigator.pushReplacementNamed(context, '/login'),
+                            child: const Text("이미 계정이 있으신가요?",
+                                style: TextStyle(color: Colors.white70)),
+                          ),
                         ],
                       ),
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: TextField(
-                      controller: phoneController,
-                      keyboardType: TextInputType.phone,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                        LengthLimitingTextInputFormatter(11),
-                      ],
-                      style: const TextStyle(color: Colors.white),
-                      decoration: const InputDecoration(
-                        hintText: "전화번호 입력",
-                        hintStyle: TextStyle(color: Colors.white70),
-                        enabledBorder: UnderlineInputBorder(
-                          borderSide: BorderSide(color: Colors.white38),
-                        ),
-                        focusedBorder: UnderlineInputBorder(
-                          borderSide: BorderSide(color: Colors.amberAccent),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+                );
+              },
             ),
-            const SizedBox(width: 12),
-            // 인증번호 받기 버튼
-            Expanded(
-              flex: 2,
-              child: SizedBox(
-                height: 44,
-                child: ElevatedButton(
-                  onPressed: _sendOtp,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 1, vertical: 12),
-                  ),
-                  child: const Text("인증번호 받기", style: TextStyle(fontSize: 12, color: Colors.black)),
-                ),
-              ),
-            ),
-          ],
-        ),
-
-        const SizedBox(height: 6),
-        const Text(
-          "하이픈(-) 없이 숫자만 입력해주세요. 예) 01012345678",
-          style: TextStyle(color: Colors.white54, fontSize: 13),
-        ),
-        const SizedBox(height: 12),
-
-        if (_otpSent) ...[
-          // 인증번호 입력 + 확인 버튼 한 줄
-          Row(
-            children: [
-              Expanded(
-                flex: 6,
-                child: TextField(
-                  controller: otpController,
-                  keyboardType: TextInputType.number,
-                  style: const TextStyle(color: Colors.white),
-                  decoration: const InputDecoration(
-                    labelText: "인증번호 입력",
-                    labelStyle: TextStyle(color: Colors.white70),
-                    enabledBorder: UnderlineInputBorder(
-                      borderSide: BorderSide(color: Colors.white38),
-                    ),
-                    focusedBorder: UnderlineInputBorder(
-                      borderSide: BorderSide(color: Colors.amberAccent),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                flex: 2,
-                child: SizedBox(
-                  height: 44,
-                  child: ElevatedButton(
-                    onPressed: _verifyOtp,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 1, vertical: 12),
-                    ),
-                    child: const Text("인증번호 확인", style: TextStyle(fontSize: 13, color: Colors.black)),
-                  ),
-                ),
-              ),
-            ],
           ),
-          if (_phoneVerified) ...[
-            const SizedBox(height: 6),
-            const Row(
-              children: [
-                Icon(Icons.check_circle, color: Colors.green, size: 20),
-                SizedBox(width: 6),
-                Text("전화번호 인증 완료", style: TextStyle(color: Colors.green)),
-              ],
-            ),
-          ],
-        ],
-      ],
-    );
-  }
-
-  void _showCountryPickerBottomSheet() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: const Color(0xFF0A1D27),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        ),
       ),
-      builder: (BuildContext context) {
-        return FractionallySizedBox(
-          heightFactor: 0.9,
-          child: Column(
-            children: [
-              const Padding(
-                padding: EdgeInsets.all(16),
-                child: Text(
-                  '국가 선택',
-                  style: TextStyle(color: Colors.white, fontSize: 18),
-                ),
-              ),
-              Expanded(
-                child: ListView.builder(
-                  itemCount: countryList.length,
-                  itemBuilder: (context, index) {
-                    final country = countryList[index];
-                    return ListTile(
-                      onTap: () {
-                        setState(() {
-                          _selectedCountryCode = country['code']!;
-                          _selectedCountryName = country['name']!;
-                        });
-                        Navigator.pop(context);
-                      },
-                      leading: Text(country['flag'] ?? '🌐', style: const TextStyle(fontSize: 20)),
-                      title: Text(
-                        '${country['name']} (${country['code']})',
-                        style: const TextStyle(color: Colors.white),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        );
-      },
     );
   }
-
-  final List<Map<String, String>> countryList = [
-    {'name': 'South Korea', 'code': '+82', 'flag': '🇰🇷'},
-    {'name': 'United States', 'code': '+1', 'flag': '🇺🇸'},
-    {'name': 'Japan', 'code': '+81', 'flag': '🇯🇵'},
-    {'name': 'United Kingdom', 'code': '+44', 'flag': '🇬🇧'},
-    {'name': 'Germany', 'code': '+49', 'flag': '🇩🇪'},
-    {'name': 'France', 'code': '+33', 'flag': '🇫🇷'},
-    {'name': 'China', 'code': '+86', 'flag': '🇨🇳'},
-    {'name': 'Canada', 'code': '+1', 'flag': '🇨🇦'},
-    {'name': 'Australia', 'code': '+61', 'flag': '🇦🇺'},
-    // 필요한 만큼 추가
-  ];
-
 }

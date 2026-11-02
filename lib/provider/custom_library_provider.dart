@@ -20,31 +20,40 @@ class CustomLibraryProvider extends ChangeNotifier {
   String? get recentCreated => _recentCreated;
   void clearRecentCreated() => _recentCreated = null;
 
-  /// ✅ Firestore로부터 커스텀 서재 불러오기
+  /// ✅ Firestore에서 저장된 순서대로 커스텀 서재 불러오기
   Future<void> fetchLibraries() async {
     final libraries = await LibraryService.getLibraries();
+
     _libraries.clear();
     _orderedNames.clear();
 
     for (final lib in libraries) {
-      final name = lib['name'];
-      final books = List<String>.from(lib['books'] ?? []); // ✅ 책 리스트도 불러오기
+      final name = lib['name'] as String?;
+      if (name == null || name.trim().isEmpty) continue;
+
+      final books = List<String>.from(lib['books'] ?? []);
+
       _libraries[name] = books;
       _orderedNames.add(name);
     }
+
     notifyListeners();
   }
 
   /// ✅ Firestore에 새 서재 추가
   Future<void> createLibrary(String name, {required BuildContext context}) async {
     final userData = context.read<UserDataProvider>();
-    final isSubscribed = userData.isSubscribed;
+    final isPremium = userData.isPremiumActive; // ✅ 이벤트/만료 포함 최종 프리미엄
 
     final trimmed = name.trim();
 
-    // ✅ 일반 유저는 3개까지만 허용
-    if (!isSubscribed && _orderedNames.length >= 3) {
+    // ✅ 무료 유저는 3개까지만 허용 (이벤트 기간엔 전원 프리미엄이므로 제한 해제)
+    if (!isPremium && _orderedNames.length >= 3) {
       throw Exception('일반 사용자는 최대 3개의 서재만 생성할 수 있습니다.');
+    }
+
+    if (trimmed.isEmpty) {
+      throw Exception('서재 이름을 입력해주세요.');
     }
 
     if (!_libraries.containsKey(trimmed)) {
@@ -86,11 +95,41 @@ class CustomLibraryProvider extends ChangeNotifier {
     }
   }
 
-  /// ✅ 로컬: 서재 순서 변경
-  void reorderLibrary(int oldIndex, int newIndex) {
+  /// ✅ 커스텀 서재 순서 변경
+  /// 화면에는 즉시 반영하고, 변경된 순서를 Firestore에도 저장한다.
+  Future<void> reorderLibrary(
+      int oldIndex,
+      int newIndex,
+      ) async {
+    if (oldIndex < 0 ||
+        oldIndex >= _orderedNames.length ||
+        newIndex < 0 ||
+        newIndex >= _orderedNames.length) {
+      return;
+    }
+
+    // 저장 실패 시 복구하기 위한 기존 순서
+    final previousOrder = List<String>.from(_orderedNames);
+
     final item = _orderedNames.removeAt(oldIndex);
     _orderedNames.insert(newIndex, item);
+
+    // UI에는 즉시 반영
     notifyListeners();
+
+    try {
+      await LibraryService.saveLibraryOrder(
+        List<String>.from(_orderedNames),
+      );
+    } catch (e) {
+      // Firestore 저장 실패 시 이전 순서로 복구
+      _orderedNames
+        ..clear()
+        ..addAll(previousOrder);
+
+      notifyListeners();
+      rethrow;
+    }
   }
 
   /// ✅ Firestore + 로컬: 서재에 책 추가

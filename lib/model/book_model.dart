@@ -14,6 +14,12 @@ class BookModel {
   final File? imageFile; // ✅ 로컬 이미지 (직접 등록한 이미지 파일)
   final String? imageUrl; // ✅ URL 이미지 (API에서 받은 이미지)
   final String? itemId; // ✅ 알라딘 고유 아이템 ID
+
+  // ✅ YES24 책등 이미지용
+  final String? yes24ItemId;
+  final String? spineUrl;
+  final bool spineChecked;
+
   final int pageCount;
   int pageRead;
   final List<DateTime>? readingDates;
@@ -38,6 +44,9 @@ class BookModel {
     this.imageFile,
     this.imageUrl,
     this.itemId,
+    this.yes24ItemId,
+    this.spineUrl,
+    this.spineChecked = false,
     this.pageCount = 0,
     this.pageRead = 0,
     this.readingDates,
@@ -55,6 +64,9 @@ class BookModel {
     return BookModel(
       id: map['id'],
       itemId: map['itemId']?.toString(),
+      yes24ItemId: map['yes24ItemId']?.toString(),
+      spineUrl: map['spineUrl']?.toString(),
+      spineChecked: map['spineChecked'] == true,
       title: map['title'] ?? '',
       author: map['author'] ?? '',
       publisher: map['publisher'],
@@ -65,7 +77,7 @@ class BookModel {
       pageRead: int.tryParse(map['pageRead']?.toString() ?? '0') ?? 0,
       readingDates: (map['readingDates'] as List?)?.map((e) => DateTime.parse(e)).toList(),
       rating: map['rating'] != null ? (map['rating'] as num).toDouble() : null,
-      rereadCount: int.tryParse(map['rereadCount']?.toString() ?? '1') ?? 1,
+      rereadCount: int.tryParse(map['rereadCount']?.toString() ?? '0') ?? 0,
       category: map['category'] ?? 'reading',
       customLibraries: List<String>.from(map['customLibraries'] ?? []),
       startDate: map['startDate'] != null ? DateTime.tryParse(map['startDate'])?.toLocal() : null,
@@ -79,6 +91,9 @@ class BookModel {
     return {
       'id': id,
       'itemId': itemId,
+      'yes24ItemId': yes24ItemId,
+      'spineUrl': spineUrl,
+      'spineChecked': spineChecked,
       'title': title,
       'author': author,
       'publisher': publisher,
@@ -98,31 +113,56 @@ class BookModel {
     };
   }
 
-  factory BookModel.fromFirestore(Map<String, dynamic> map, String docId) {
+  factory BookModel.fromFirestore(
+      Map<String, dynamic> map,
+      String docId,
+      ) {
     return BookModel(
       id: docId,
+      itemId: map['itemId']?.toString(),
+      yes24ItemId: map['yes24ItemId']?.toString(),
+      spineUrl: map['spineUrl']?.toString(),
+      spineChecked: map['spineChecked'] == true,
       title: map['title'] ?? '',
       author: map['author'] ?? '',
       publisher: map['publisher'],
       isbn: map['isbn'],
       description: map['description'],
       imageUrl: map['imageUrl'],
-      pageCount: int.tryParse(map['pageCount']?.toString() ?? '') ?? 0,
-      pageRead: int.tryParse(map['pageRead']?.toString() ?? '0') ?? 0,
-      readingDates: (map['readingDates'] as List?)?.map((e) => DateTime.parse(e)).toList(),
-      rating: map['rating'] != null ? (map['rating'] as num).toDouble() : null,
-      rereadCount: int.tryParse(map['rereadCount']?.toString() ?? '1') ?? 1,
+      pageCount:
+      int.tryParse(map['pageCount']?.toString() ?? '') ?? 0,
+      pageRead:
+      int.tryParse(map['pageRead']?.toString() ?? '0') ?? 0,
+      readingDates: (map['readingDates'] as List?)
+          ?.map((e) => DateTime.parse(e.toString()))
+          .toList(),
+      rating: map['rating'] != null
+          ? (map['rating'] as num).toDouble()
+          : null,
+      rereadCount:
+      int.tryParse(map['rereadCount']?.toString() ?? '0') ?? 0,
       category: map['category'] ?? 'reading',
-      customLibraries: List<String>.from(map['customLibraries'] ?? []),
-      startDate: map['startDate'] != null ? DateTime.tryParse(map['startDate'])?.toLocal() : null,
-      endDate: map['endDate'] != null ? DateTime.tryParse(map['endDate'])?.toLocal() : null,
-      readDate: map['readDate'] != null ? DateTime.tryParse(map['readDate'])?.toLocal() : null,
+      customLibraries:
+      List<String>.from(map['customLibraries'] ?? []),
+      startDate: map['startDate'] != null
+          ? DateTime.tryParse(map['startDate'].toString())?.toLocal()
+          : null,
+      endDate: map['endDate'] != null
+          ? DateTime.tryParse(map['endDate'].toString())?.toLocal()
+          : null,
+      readDate: map['readDate'] != null
+          ? DateTime.tryParse(map['readDate'].toString())?.toLocal()
+          : null,
     );
   }
 
   Map<String, dynamic> toFirestore() {
     return {
-      'id':id,
+      'id': id,
+      'itemId': itemId,
+      'yes24ItemId': yes24ItemId,
+      'spineUrl': spineUrl,
+      'spineChecked': spineChecked,
       'title': title,
       'author': author,
       'publisher': publisher,
@@ -131,7 +171,8 @@ class BookModel {
       'imageUrl': imageUrl,
       'pageCount': pageCount,
       'pageRead': pageRead,
-      'readingDates': readingDates?.map((e) => e.toIso8601String()).toList(),
+      'readingDates':
+      readingDates?.map((e) => e.toIso8601String()).toList(),
       'rating': rating,
       'rereadCount': rereadCount,
       'category': category,
@@ -165,6 +206,10 @@ class BookModel {
     File? imageFile,
     String? imageUrl,
     String? itemId,
+    String? yes24ItemId,
+    String? spineUrl,
+    bool? spineChecked,
+    bool clearSpineUrl = false,
     int? pageCount,
     int? pageRead,
     List<DateTime>? readingDates,
@@ -186,6 +231,13 @@ class BookModel {
       imageFile: imageFile ?? this.imageFile,
       imageUrl: imageUrl ?? this.imageUrl,
       itemId: itemId ?? this.itemId,
+      yes24ItemId: yes24ItemId ?? this.yes24ItemId,
+      spineUrl:
+      clearSpineUrl
+          ? null
+          : (spineUrl ?? this.spineUrl),
+      spineChecked:
+      spineChecked ?? this.spineChecked,
       pageCount: pageCount ?? this.pageCount,
       pageRead: pageRead ?? this.pageRead,
       readingDates: readingDates ?? this.readingDates,
@@ -233,6 +285,8 @@ class BookModel {
       startDate: null,
       endDate: null,
     );
+
+
   }
 
   factory BookModel.fromNaverApi(Map<String, dynamic> json) {
@@ -279,6 +333,52 @@ class BookModel {
     );
   }
 
+  factory BookModel.selfRegistered({
+    required String title,
+    required String author,
+    required String publisher,
+    String? isbn,
+    required int pageCount,
+    required String imageUrl,
+    required String category,
+    required DateTime? startDate,
+    required DateTime? endDate,
+    required int pageRead,
+  }) {
+    final trimmedTitle = title.trim();
+    final trimmedAuthor = author.trim();
+    final trimmedPublisher = publisher.trim();
+
+    final normalizedIsbn = (isbn ?? '')
+        .replaceAll(RegExp(r'[^0-9Xx]'), '')
+        .toUpperCase();
+
+    return BookModel(
+      // 직접 등록 책은 ISBN 유무와 관계없이 고유 UUID 사용
+      id: 'self_${const Uuid().v4()}',
+      title: trimmedTitle,
+      author: trimmedAuthor,
+      publisher: trimmedPublisher,
+      isbn: normalizedIsbn.isEmpty ? null : normalizedIsbn,
+      description: null,
+      imageUrl: imageUrl,
+      imageFile: null,
+      itemId: null,
+      pageCount: pageCount,
+      pageRead: pageRead,
+      rereadCount: category == 'done' ? 1 : 0,
+      category: category,
+      customLibraries: const [],
+      startDate: category == 'done' || category == 'reading'
+          ? startDate
+          : null,
+      endDate: category == 'done' ? endDate : null,
+      readDate: category == 'done'
+          ? endDate ?? DateTime.now()
+          : null,
+    );
+  }
+
 }
 
 extension BookModelImageSafe on BookModel {
@@ -289,3 +389,4 @@ extension BookModelImageSafe on BookModel {
     return 'https://via.placeholder.com/150x220?text=No+Image';
   }
 }
+

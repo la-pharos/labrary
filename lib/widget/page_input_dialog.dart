@@ -15,122 +15,715 @@ class PageInputDialog extends StatefulWidget {
   });
 
   @override
-  State<PageInputDialog> createState() => _PageInputDialogState();
+  State<PageInputDialog> createState() =>
+      _PageInputDialogState();
 }
 
-class _PageInputDialogState extends State<PageInputDialog> {
+class _PageInputDialogState
+    extends State<PageInputDialog> {
   late TextEditingController _controller;
+
   String? _errorText;
   bool isFullyRead = false;
 
   @override
   void initState() {
     super.initState();
-    _controller = TextEditingController(text: widget.initialPage?.toString() ?? '');
-  }
 
-  void _validateAndSubmit() {
-    final text = _controller.text.trim();
-    final page = int.tryParse(text);
+    _controller = TextEditingController(
+      text:
+      widget.initialPage?.toString() ??
+          '',
+    );
 
-    if (text.isEmpty) {
-      widget.onConfirm?.call(null, false);
-      Navigator.of(context).pop({'page': null, 'done': false});
-    } else if (page == null || page < 1) {
-      setState(() => _errorText = "1쪽 이상 입력해주세요.");
-    } else if (page > widget.totalPages) {
-      setState(() => _errorText = "총 페이지 수(${widget.totalPages})를 넘을 수 없어요.");
-    } else {
-      final isDone = page == widget.totalPages;
-      widget.onConfirm?.call(page, isDone);
-      Navigator.of(context).pop({'page': page, 'done': isDone});
-    }
+    isFullyRead =
+        widget.initialPage != null &&
+            widget.initialPage ==
+                widget.totalPages;
   }
 
   @override
-  Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final screenHeight = MediaQuery.of(context).size.height;
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
-    final fontSizeTitle = screenWidth * 0.05; // 약 20~22
-    final fontSizeBody = screenWidth * 0.035;
-    final fontSizeInput = screenWidth * 0.03;
-    final fontSizeButton = screenWidth * 0.03;
-    final dialogPadding = screenWidth * 0.04;
+  void _validateAndSubmit() {
+    final text =
+    _controller.text.trim();
+
+    final page =
+    int.tryParse(text);
+
+    if (text.isEmpty) {
+      widget.onConfirm?.call(
+        null,
+        false,
+      );
+
+      Navigator.of(context).pop({
+        'page': null,
+        'done': false,
+      });
+
+      return;
+    }
+
+    if (page == null ||
+        page < 1) {
+      setState(() {
+        _errorText =
+        '1페이지 이상 입력해주세요.';
+      });
+
+      return;
+    }
+
+    if (page >
+        widget.totalPages) {
+      setState(() {
+        _errorText =
+        '총 ${widget.totalPages}페이지를 넘을 수 없어요.';
+      });
+
+      return;
+    }
+
+    final isDone =
+        page == widget.totalPages;
+
+    widget.onConfirm?.call(
+      page,
+      isDone,
+    );
+
+    Navigator.of(context).pop({
+      'page': page,
+      'done': isDone,
+    });
+  }
+
+  @override
+  Widget build(
+      BuildContext context,
+      ) {
+    final screenWidth =
+        MediaQuery.of(context)
+            .size
+            .width;
+
+    final currentPage =
+        int.tryParse(
+          _controller.text.trim(),
+        ) ??
+            0;
+
+    final validCurrentPage =
+    currentPage.clamp(
+      0,
+      widget.totalPages,
+    );
+
+    final progress =
+    widget.totalPages > 0
+        ? (validCurrentPage /
+        widget.totalPages)
+        .clamp(
+      0.0,
+      1.0,
+    )
+        .toDouble()
+        : 0.0;
+
+    final percent =
+    (progress * 100).round();
 
     return Dialog(
-      backgroundColor: const Color(0xFF0A1D27),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: EdgeInsets.all(dialogPadding),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildDialogHeader(context, fontSizeTitle),
-            SizedBox(height: screenHeight * 0.015),
-            Text(
-              "총 ${widget.totalPages}페이지 중 몇 페이지까지 읽으셨나요?",
-              style: TextStyle(
-                fontSize: fontSizeBody,
-                color: Colors.white,
-                fontFamily: 'kopub',
+      backgroundColor:
+      Colors.transparent,
+
+      insetPadding:
+      EdgeInsets.symmetric(
+        horizontal:
+        screenWidth * 0.06,
+      ),
+
+      child: Container(
+        width: double.infinity,
+        padding:
+        EdgeInsets.all(
+          screenWidth * 0.045,
+        ),
+        decoration:
+        BoxDecoration(
+          color:
+          const Color(
+            0xFF16483F,
+          ),
+          borderRadius:
+          BorderRadius.circular(
+            20,
+          ),
+          border:
+          Border.all(
+            color:
+            Colors.white
+                .withOpacity(
+              0.08,
+            ),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color:
+              Colors.black
+                  .withOpacity(
+                0.30,
+              ),
+              blurRadius:
+              24,
+              offset:
+              const Offset(
+                0,
+                10,
               ),
             ),
-            SizedBox(height: screenHeight * 0.02),
+          ],
+        ),
+        child: Column(
+          mainAxisSize:
+          MainAxisSize.min,
+          crossAxisAlignment:
+          CrossAxisAlignment.start,
+          children: [
+            // =================================================
+            // HEADER
+            // =================================================
+
+            _buildDialogHeader(
+              context,
+              screenWidth,
+            ),
+
+            SizedBox(
+              height:
+              screenWidth * 0.035,
+            ),
+
+            // =================================================
+            // LABEL
+            // =================================================
+
+            Text(
+              '읽은 페이지',
+              style: TextStyle(
+                color:
+                Colors.white
+                    .withOpacity(
+                  0.65,
+                ),
+                fontFamily:
+                'kopub',
+                fontSize:
+                screenWidth *
+                    0.029,
+                fontWeight:
+                FontWeight.w600,
+              ),
+            ),
+
+            SizedBox(
+              height:
+              screenWidth * 0.015,
+            ),
+
+            // =================================================
+            // INPUT
+            // =================================================
+
             TextField(
-              controller: _controller,
-              keyboardType: TextInputType.number,
-              style: TextStyle(color: Colors.white, fontSize: fontSizeInput),
-              decoration: InputDecoration(
-                hintText: "읽은 페이지수를 입력하세요.",
-                hintStyle: const TextStyle(color: Colors.white54),
-                filled: true,
-                fillColor: Colors.white10,
-                errorText: _errorText,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide.none,
+              controller:
+              _controller,
+
+              keyboardType:
+              TextInputType.number,
+
+              textInputAction:
+              TextInputAction.done,
+
+              style:
+              TextStyle(
+                color:
+                Colors.white,
+                fontFamily:
+                'kopub',
+                fontSize:
+                screenWidth *
+                    0.04,
+                fontWeight:
+                FontWeight.w600,
+              ),
+
+              decoration:
+              InputDecoration(
+                hintText:
+                '0',
+
+                hintStyle:
+                TextStyle(
+                  color:
+                  Colors.white24,
+                  fontFamily:
+                  'kopub',
+                ),
+
+                suffixText:
+                '페이지',
+
+                suffixStyle:
+                TextStyle(
+                  color:
+                  Colors.white54,
+                  fontFamily:
+                  'kopub',
+                  fontSize:
+                  screenWidth *
+                      0.029,
+                ),
+
+                filled:
+                true,
+
+                fillColor:
+                Colors.white
+                    .withOpacity(
+                  0.04,
+                ),
+
+                contentPadding:
+                EdgeInsets.symmetric(
+                  horizontal:
+                  screenWidth *
+                      0.035,
+                  vertical:
+                  screenWidth *
+                      0.035,
+                ),
+
+                errorText:
+                _errorText,
+
+                errorStyle:
+                TextStyle(
+                  color:
+                  Colors.redAccent
+                      .withOpacity(
+                    0.85,
+                  ),
+                  fontFamily:
+                  'kopub',
+                  fontSize:
+                  screenWidth *
+                      0.025,
+                ),
+
+                enabledBorder:
+                OutlineInputBorder(
+                  borderRadius:
+                  BorderRadius
+                      .circular(
+                    14,
+                  ),
+                  borderSide:
+                  BorderSide(
+                    color:
+                    Colors.white
+                        .withOpacity(
+                      0.07,
+                    ),
+                  ),
+                ),
+
+                focusedBorder:
+                OutlineInputBorder(
+                  borderRadius:
+                  BorderRadius
+                      .circular(
+                    14,
+                  ),
+                  borderSide:
+                  BorderSide(
+                    color:
+                    Colors.amberAccent
+                        .withOpacity(
+                      0.50,
+                    ),
+                  ),
+                ),
+
+                errorBorder:
+                OutlineInputBorder(
+                  borderRadius:
+                  BorderRadius
+                      .circular(
+                    14,
+                  ),
+                  borderSide:
+                  BorderSide(
+                    color:
+                    Colors.redAccent
+                        .withOpacity(
+                      0.55,
+                    ),
+                  ),
+                ),
+
+                focusedErrorBorder:
+                OutlineInputBorder(
+                  borderRadius:
+                  BorderRadius
+                      .circular(
+                    14,
+                  ),
+                  borderSide:
+                  BorderSide(
+                    color:
+                    Colors.redAccent
+                        .withOpacity(
+                      0.75,
+                    ),
+                  ),
+                ),
+
+                border:
+                OutlineInputBorder(
+                  borderRadius:
+                  BorderRadius
+                      .circular(
+                    14,
+                  ),
                 ),
               ),
-              onChanged: (text) {
-                final page = int.tryParse(text);
+
+              onChanged:
+                  (text) {
+                final page =
+                int.tryParse(
+                  text.trim(),
+                );
+
                 setState(() {
-                  isFullyRead = page == widget.totalPages;
+                  _errorText = null;
+
+                  isFullyRead =
+                      page ==
+                          widget
+                              .totalPages;
                 });
               },
-              onSubmitted: (_) => _validateAndSubmit(),
+
+              onSubmitted:
+                  (_) =>
+                  _validateAndSubmit(),
             ),
-            if (isFullyRead) ...[
-              SizedBox(height: screenHeight * 0.01),
-              Center(
-                child: Text(
-                  "🎉 책을 모두 읽으셨네요!",
-                  style: TextStyle(
-                    color: Colors.greenAccent,
-                    fontFamily: 'kopub',
-                    fontSize: fontSizeBody,
+
+            SizedBox(
+              height:
+              screenWidth * 0.025,
+            ),
+
+            // =================================================
+            // PROGRESS INFO
+            // =================================================
+
+            Container(
+              width: double.infinity,
+              padding:
+              EdgeInsets.all(
+                screenWidth * 0.035,
+              ),
+              decoration:
+              BoxDecoration(
+                color:
+                Colors.white
+                    .withOpacity(
+                  0.035,
+                ),
+                borderRadius:
+                BorderRadius.circular(
+                  14,
+                ),
+                border:
+                Border.all(
+                  color:
+                  Colors.white
+                      .withOpacity(
+                    0.06,
                   ),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment:
+                CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          widget.totalPages > 0
+                              ? '$validCurrentPage / ${widget.totalPages} 페이지'
+                              : '페이지 정보 없음',
+                          style:
+                          TextStyle(
+                            color:
+                            Colors.white70,
+                            fontFamily:
+                            'kopub',
+                            fontSize:
+                            screenWidth *
+                                0.028,
+                          ),
+                        ),
+                      ),
+
+                      if (widget.totalPages >
+                          0)
+                        Text(
+                          '$percent%',
+                          style:
+                          TextStyle(
+                            color:
+                            Colors.amberAccent,
+                            fontFamily:
+                            'kopub',
+                            fontSize:
+                            screenWidth *
+                                0.028,
+                            fontWeight:
+                            FontWeight.bold,
+                          ),
+                        ),
+                    ],
+                  ),
+
+                  if (widget.totalPages >
+                      0) ...[
+                    SizedBox(
+                      height:
+                      screenWidth *
+                          0.018,
+                    ),
+
+                    ClipRRect(
+                      borderRadius:
+                      BorderRadius
+                          .circular(
+                        20,
+                      ),
+                      child:
+                      LinearProgressIndicator(
+                        value:
+                        progress,
+                        minHeight:
+                        screenWidth *
+                            0.014,
+                        backgroundColor:
+                        Colors.white
+                            .withOpacity(
+                          0.07,
+                        ),
+                        color:
+                        Colors.amberAccent,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+
+            // =================================================
+            // COMPLETE
+            // =================================================
+
+            if (isFullyRead) ...[
+              SizedBox(
+                height:
+                screenWidth * 0.025,
+              ),
+
+              Container(
+                width:
+                double.infinity,
+                padding:
+                EdgeInsets.symmetric(
+                  horizontal:
+                  screenWidth *
+                      0.03,
+                  vertical:
+                  screenWidth *
+                      0.025,
+                ),
+                decoration:
+                BoxDecoration(
+                  color:
+                  Colors.amberAccent
+                      .withOpacity(
+                    0.07,
+                  ),
+                  borderRadius:
+                  BorderRadius.circular(
+                    12,
+                  ),
+                  border:
+                  Border.all(
+                    color:
+                    Colors.amberAccent
+                        .withOpacity(
+                      0.18,
+                    ),
+                  ),
+                ),
+                child:
+                Row(
+                  children: [
+                    Container(
+                      width:
+                      screenWidth *
+                          0.07,
+                      height:
+                      screenWidth *
+                          0.07,
+                      decoration:
+                      BoxDecoration(
+                        color:
+                        Colors.amberAccent
+                            .withOpacity(
+                          0.12,
+                        ),
+                        shape:
+                        BoxShape.circle,
+                      ),
+                      child:
+                      Icon(
+                        Icons
+                            .check_rounded,
+                        color:
+                        Colors.amberAccent,
+                        size:
+                        screenWidth *
+                            0.04,
+                      ),
+                    ),
+
+                    SizedBox(
+                      width:
+                      screenWidth *
+                          0.02,
+                    ),
+
+                    Expanded(
+                      child: Text(
+                        '이 책을 모두 읽었어요.',
+                        style:
+                        TextStyle(
+                          color:
+                          Colors.amberAccent,
+                          fontFamily:
+                          'kopub',
+                          fontSize:
+                          screenWidth *
+                              0.028,
+                          fontWeight:
+                          FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
-            SizedBox(height: screenHeight * 0.025),
+
             SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _validateAndSubmit,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.amberAccent,
-                  padding: EdgeInsets.symmetric(vertical: screenHeight * 0.018),
-                ),
-                child: Text(
-                  "기록 완료",
-                  style: TextStyle(
-                    color: Colors.black,
-                    fontFamily: 'kopub',
-                    fontWeight: FontWeight.bold,
-                    fontSize: fontSizeButton,
+              height:
+              screenWidth * 0.035,
+            ),
+
+            // =================================================
+            // CTA
+            // =================================================
+
+            SizedBox(
+              width:
+              double.infinity,
+              child:
+              ElevatedButton(
+                onPressed:
+                _validateAndSubmit,
+
+                style:
+                ElevatedButton
+                    .styleFrom(
+                  backgroundColor:
+                  Colors.amberAccent,
+
+                  foregroundColor:
+                  const Color(
+                    0xFF013328,
                   ),
+
+                  elevation:
+                  0,
+
+                  padding:
+                  EdgeInsets.symmetric(
+                    vertical:
+                    screenWidth *
+                        0.038,
+                  ),
+
+                  shape:
+                  RoundedRectangleBorder(
+                    borderRadius:
+                    BorderRadius
+                        .circular(
+                      14,
+                    ),
+                  ),
+                ),
+
+                child:
+                Row(
+                  mainAxisAlignment:
+                  MainAxisAlignment
+                      .center,
+                  children: [
+                    Icon(
+                      Icons
+                          .check_rounded,
+                      size:
+                      screenWidth *
+                          0.042,
+                    ),
+
+                    SizedBox(
+                      width:
+                      screenWidth *
+                          0.012,
+                    ),
+
+                    Text(
+                      '기록 완료',
+                      style:
+                      TextStyle(
+                        fontFamily:
+                        'kopub',
+                        fontWeight:
+                        FontWeight.bold,
+                        fontSize:
+                        screenWidth *
+                            0.032,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -140,22 +733,80 @@ class _PageInputDialogState extends State<PageInputDialog> {
     );
   }
 
-  Widget _buildDialogHeader(BuildContext context, double fontSize) {
+  // =========================================================
+  // HEADER
+  // =========================================================
+
+  Widget _buildDialogHeader(
+      BuildContext context,
+      double screenWidth,
+      ) {
     return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      crossAxisAlignment:
+      CrossAxisAlignment.start,
       children: [
-        Text(
-          "페이지 입력",
-          style: TextStyle(
-            fontSize: fontSize,
-            fontWeight: FontWeight.bold,
-            fontFamily: 'kopub',
-            color: Colors.white,
+        Expanded(
+          child: Column(
+            crossAxisAlignment:
+            CrossAxisAlignment.start,
+            children: [
+              Text(
+                '페이지 기록',
+                style:
+                TextStyle(
+                  fontSize:
+                  screenWidth *
+                      0.043,
+                  fontWeight:
+                  FontWeight.bold,
+                  fontFamily:
+                  'kopub',
+                  color:
+                  Colors.white,
+                ),
+              ),
+
+              SizedBox(
+                height:
+                screenWidth *
+                    0.01,
+              ),
+
+              Text(
+                '오늘 읽은 위치를 기록해주세요.',
+                style:
+                TextStyle(
+                  color:
+                  Colors.white
+                      .withOpacity(
+                    0.50,
+                  ),
+                  fontFamily:
+                  'kopub',
+                  fontSize:
+                  screenWidth *
+                      0.028,
+                ),
+              ),
+            ],
           ),
         ),
+
         IconButton(
-          icon: const Icon(Icons.close, color: Colors.white),
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed:
+              () {
+            Navigator.of(context)
+                .pop();
+          },
+          icon:
+          Icon(
+            Icons.close_rounded,
+            color:
+            Colors.white54,
+            size:
+            screenWidth *
+                0.05,
+          ),
         ),
       ],
     );

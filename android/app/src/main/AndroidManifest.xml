@@ -1,17 +1,21 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Android 10 이하에서 공유카드를 사진 앨범에 저장하기 위한 권한 -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29" />
+
     <application
         android:enableOnBackInvokedCallback="true"
         android:label="Labrary"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
-
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-3940256099942544~3347511713"/> <!-- 테스트용 App ID -->
-
+            android:value="ca-app-pub-2078077942953061~7762456788"/>
+        <!-- AdMob Android App ID -->
         <activity
             android:name=".MainActivity"
-            android:screenOrientation="portrait"
             android:exported="true"
             android:launchMode="singleTop"
             android:taskAffinity=""
@@ -19,24 +23,39 @@
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize">
+            <!-- app_links 사용을 위해 Flutter 기본 딥링크 처리 비활성화 -->
+            <meta-data
+                android:name="flutter_deeplinking_enabled"
+                android:value="false" />
             <!-- Specifies an Android theme to apply to this Activity as soon as
                  the Android process has started. This theme is visible to the user
                  while the Flutter UI initializes. After that, this theme continues
                  to determine the Window background behind the Flutter UI. -->
             <meta-data
-              android:name="io.flutter.embedding.android.NormalTheme"
-              android:resource="@style/NormalTheme"
-              />
+                android:name="io.flutter.embedding.android.NormalTheme"
+                android:resource="@style/NormalTheme"/>
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+            <!-- Labrary 챌린지 공유 링크 -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data
+                    android:scheme="https"
+                    android:host="la-pharos.web.app"
+                    android:pathPrefix="/challenge/" />
             </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
             android:name="flutterEmbedding"
-            android:value="2" />
+            android:value="2"/>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and
@@ -46,16 +65,18 @@
     <queries>
         <!-- (기존) Flutter 텍스트 처리 -->
         <intent>
-            <action android:name="android.intent.action.PROCESS_TEXT" />
-            <data android:mimeType="text/plain" />
+            <action
+                android:name="android.intent.action.PROCESS_TEXT"/>
+            <data
+                android:mimeType="text/plain"/>
         </intent>
-
         <!-- (추가) Google Play 스토어 패키지 가시성 -->
-        <package android:name="com.android.vending" />
-
+        <package
+            android:name="com.android.vending"/>
         <!-- (추가) Play Billing 서비스 바인딩 가시성 -->
         <intent>
-            <action android:name="com.android.vending.billing.InAppBillingService.BIND" />
+            <action
+                android:name="com.android.vending.billing.InAppBillingService.BIND"/>
         </intent>
     </queries>
 </manifest>

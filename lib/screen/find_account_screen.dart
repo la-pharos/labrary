@@ -1,244 +1,603 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 class FindAccountScreen extends StatefulWidget {
-  const FindAccountScreen({super.key});
+  const FindAccountScreen({
+    super.key,
+  });
 
   @override
-  State<FindAccountScreen> createState() => _FindAccountScreenState();
+  State<FindAccountScreen> createState() =>
+      _FindAccountScreenState();
 }
 
-class _FindAccountScreenState extends State<FindAccountScreen> {
-  final phoneController = TextEditingController();
-  final emailController = TextEditingController();
-  String foundEmail = "";
-  bool isLoading = false;
-  bool _otpSent = false;
-  bool _otpVerified = false;
-  String _verificationId = "";
-  final otpController = TextEditingController();
-  int? _resendToken;
+class _FindAccountScreenState
+    extends State<FindAccountScreen> {
+  final TextEditingController emailController =
+  TextEditingController();
 
+  bool isSending = false;
 
-  Future<void> _findEmailByPhone() async {
-    setState(() {
-      isLoading = true;
-      foundEmail = "";
-    });
+  @override
+  void dispose() {
+    emailController.dispose();
+    super.dispose();
+  }
 
-    final phone = phoneController.text.replaceAll(RegExp(r'\D'), '');
+  void _snack(String msg) {
+    if (!mounted) return;
 
-    try {
-      final query = await FirebaseFirestore.instance
-          .collection('users')
-          .where('phone', isEqualTo: phone)
-          .get();
-
-      if (query.docs.isNotEmpty) {
-        setState(() {
-          foundEmail = "가입된 이메일: ${query.docs.first['email']}";
-        });
-      } else {
-        setState(() {
-          foundEmail = "해당 번호로 가입된 이메일이 없습니다.";
-        });
-      }
-    } catch (e) {
-      setState(() {
-        foundEmail = "오류 발생: $e";
-      });
-    } finally {
-      setState(() => isLoading = false);
-    }
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            msg,
+            style: const TextStyle(
+              fontFamily: 'kopub',
+            ),
+          ),
+        ),
+      );
   }
 
   Future<void> _sendPasswordResetEmail() async {
-    final email = emailController.text.trim();
+    final email =
+    emailController.text.trim();
+
     if (email.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("이메일을 입력해주세요")),
+      _snack(
+        '이메일을 입력해주세요.',
       );
       return;
     }
 
+    setState(() {
+      isSending = true;
+    });
+
     try {
-      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("비밀번호 재설정 메일을 보냈습니다.")),
+      await FirebaseAuth.instance
+          .sendPasswordResetEmail(
+        email: email,
       );
+
+      _snack(
+        '비밀번호 재설정 메일을 보냈습니다. '
+            '메일함과 스팸함을 확인해주세요.',
+      );
+    } on FirebaseAuthException catch (e) {
+      String msg =
+          '재설정 메일 전송에 실패했습니다. '
+          '잠시 후 다시 시도해주세요.';
+
+      if (e.code == 'invalid-email') {
+        msg =
+        '올바른 이메일 형식을 입력해주세요.';
+      } else if (e.code ==
+          'too-many-requests') {
+        msg =
+        '요청이 너무 많습니다. '
+            '잠시 후 다시 시도해주세요.';
+      }
+
+      _snack(msg);
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("실패: $e")),
+      _snack(
+        '오류가 발생했습니다. '
+            '잠시 후 다시 시도해주세요.',
       );
+    } finally {
+      if (mounted) {
+        setState(() {
+          isSending = false;
+        });
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final screenHeight = MediaQuery.of(context).size.height;
-    final padding = screenWidth * 0.05;
-    final fontSize = screenWidth * 0.04;
+    final screenWidth =
+        MediaQuery.of(context).size.width;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF0A1D27),
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        title: const Text("아이디/비밀번호 찾기",
-            style: TextStyle(color: Colors.white, fontFamily: 'kopub')),
-        leading: const BackButton(color: Colors.white),
-        centerTitle: true,
-      ),
-      body: SingleChildScrollView(
-        padding: EdgeInsets.all(padding),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildSectionCard(
-              icon: "📧",
-              title: "아이디 찾기 (전화번호로)",
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _buildTextField(
-                          controller: phoneController,
-                          hintText: "전화번호 입력 (예: 01012345678)",
-                          keyboardType: TextInputType.number,
-                          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      ElevatedButton(
-                        onPressed: _sendOtp,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-                          minimumSize: const Size(10, 48), // 높이 맞춤
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        child: const Text("인증번호 받기", style: TextStyle(color: Colors.black)),
-                      ),
-                    ],
-                  ),
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onTap: () {
+        FocusScope.of(context).unfocus();
+      },
+      onHorizontalDragEnd: (details) {
+        final velocity =
+            details.primaryVelocity ?? 0;
 
+        if (velocity > 500) {
+          Navigator.pop(context);
+        }
+      },
+      child: Scaffold(
+        backgroundColor:
+        const Color(0xFF0A1D27),
 
-                  if (_otpSent) ...[
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _buildTextField(
-                            controller: otpController,
-                            hintText: "인증번호 입력",
-                            keyboardType: TextInputType.number,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        ElevatedButton(
-                          onPressed: _verifyOtp,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-                            minimumSize: const Size(10, 48), // 높이 맞춤
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                          child: const Text("인증번호 확인", style: TextStyle(color: Colors.black)),
-                        ),
-                      ],
-                    ),
-                  ],
+        appBar: AppBar(
+          backgroundColor:
+          Colors.transparent,
+          elevation: 0,
+          centerTitle: true,
 
-                  const SizedBox(height: 16),
-
-                  // 아이디 찾기 버튼 (인증된 경우에만 가능)
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: (_otpVerified && !isLoading) ? _findEmailByPhone : null,
-                      style: _buttonStyle(),
-                      child: isLoading
-                          ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
-                      )
-                          : const Text("아이디 찾기", style: TextStyle(color: Colors.black)),
-                    ),
-                  ),
-                  if (foundEmail.isNotEmpty) ...[
-                    const SizedBox(height: 10),
-                    Text(foundEmail,
-                        style: const TextStyle(
-                            color: Colors.amberAccent,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500)),
-                  ],
-                ],
-              ),
+          leading: IconButton(
+            onPressed: () {
+              Navigator.pop(context);
+            },
+            icon: const Icon(
+              Icons.arrow_back_rounded,
+              color: Colors.white,
             ),
-            const SizedBox(height: 30),
-            _buildSectionCard(
-              icon: "🔐",
-              title: "비밀번호 재설정 (이메일로)",
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildTextField(
-                    controller: emailController,
-                    hintText: "가입된 이메일 입력",
-                    keyboardType: TextInputType.emailAddress,
-                  ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: _sendPasswordResetEmail,
-                      style: _buttonStyle(),
-                      child: const Text("재설정 메일 보내기",
-                          style: TextStyle(color: Colors.black)),
-                    ),
-                  ),
-                ],
-              ),
+          ),
+
+          title: Text(
+            '회원정보 찾기',
+            style: TextStyle(
+              color: Colors.white,
+              fontFamily: 'kopub',
+              fontSize:
+              screenWidth * 0.045,
+              fontWeight:
+              FontWeight.w600,
             ),
-          ],
+          ),
+        ),
+
+        body: SafeArea(
+          top: false,
+          child: SingleChildScrollView(
+            physics:
+            const BouncingScrollPhysics(),
+            padding:
+            EdgeInsets.fromLTRB(
+              screenWidth * 0.055,
+              screenWidth * 0.035,
+              screenWidth * 0.055,
+              screenWidth * 0.08,
+            ),
+            child: Column(
+              crossAxisAlignment:
+              CrossAxisAlignment.center,
+              children: [
+                _buildIntro(
+                  screenWidth,
+                ),
+
+                SizedBox(
+                  height:
+                  screenWidth * 0.055,
+                ),
+
+                _buildPasswordResetCard(
+                  screenWidth,
+                ),
+
+                SizedBox(
+                  height:
+                  screenWidth * 0.035,
+                ),
+
+                _buildEmailGuideCard(
+                  screenWidth,
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildSectionCard({
-    required String icon,
-    required String title,
-    required Widget child,
-  }) {
+  Widget _buildIntro(
+      double screenWidth,
+      ) {
+    return Column(
+      crossAxisAlignment:
+      CrossAxisAlignment.center,
+      children: [
+        Container(
+          width:
+          screenWidth * 0.12,
+          height:
+          screenWidth * 0.12,
+          decoration:
+          BoxDecoration(
+            color: Colors.amberAccent
+                .withOpacity(0.08),
+            borderRadius:
+            BorderRadius.circular(14),
+          ),
+          child: Icon(
+            Icons.lock_reset_rounded,
+            color: Colors.amberAccent,
+            size:
+            screenWidth * 0.06,
+          ),
+        ),
+
+        SizedBox(
+          height:
+          screenWidth * 0.035,
+        ),
+
+        Text(
+          '비밀번호를 잊으셨나요?',
+          style: TextStyle(
+            color: Colors.white,
+            fontFamily: 'kopub',
+            fontSize:
+            screenWidth * 0.052,
+            fontWeight:
+            FontWeight.bold,
+          ),
+        ),
+
+        SizedBox(
+          height:
+          screenWidth * 0.018,
+        ),
+
+        Text(
+          '가입한 이메일로 비밀번호 재설정 링크를 보내드려요.',
+          style: TextStyle(
+            color: Colors.white
+                .withOpacity(0.52),
+            fontFamily: 'kopub',
+            fontSize:
+            screenWidth * 0.032,
+            height: 1.55,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPasswordResetCard(
+      double screenWidth,
+      ) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+      width: double.infinity,
+      padding: EdgeInsets.all(
+        screenWidth * 0.045,
+      ),
       decoration: BoxDecoration(
-        color: Colors.white10,
-        borderRadius: BorderRadius.circular(16),
+        color:
+        Colors.white.withOpacity(0.045),
+        borderRadius:
+        BorderRadius.circular(18),
+        border: Border.all(
+          color:
+          Colors.white.withOpacity(0.08),
+        ),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment:
+        CrossAxisAlignment.start,
         children: [
-          Text("$icon $title",
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontFamily: 'kopub',
-                  fontWeight: FontWeight.bold)),
-          const SizedBox(height: 14),
-          child,
+          Row(
+            children: [
+              Container(
+                width:
+                screenWidth * 0.09,
+                height:
+                screenWidth * 0.09,
+                decoration:
+                BoxDecoration(
+                  color: Colors.white
+                      .withOpacity(0.055),
+                  borderRadius:
+                  BorderRadius.circular(
+                    11,
+                  ),
+                ),
+                child: Icon(
+                  Icons
+                      .mail_outline_rounded,
+                  color:
+                  Colors.white70,
+                  size:
+                  screenWidth * 0.045,
+                ),
+              ),
+
+              SizedBox(
+                width:
+                screenWidth * 0.025,
+              ),
+
+              Expanded(
+                child: Column(
+                  crossAxisAlignment:
+                  CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '비밀번호 재설정',
+                      style: TextStyle(
+                        color:
+                        Colors.white,
+                        fontFamily:
+                        'kopub',
+                        fontSize:
+                        screenWidth *
+                            0.038,
+                        fontWeight:
+                        FontWeight.bold,
+                      ),
+                    ),
+
+                    SizedBox(
+                      height:
+                      screenWidth *
+                          0.006,
+                    ),
+
+                    Text(
+                      '가입한 이메일을 입력해주세요.',
+                      style: TextStyle(
+                        color:
+                        Colors.white54,
+                        fontFamily:
+                        'kopub',
+                        fontSize:
+                        screenWidth *
+                            0.027,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          SizedBox(
+            height:
+            screenWidth * 0.04,
+          ),
+
+          _buildTextField(
+            controller:
+            emailController,
+            hintText:
+            '이메일',
+            keyboardType:
+            TextInputType.emailAddress,
+            screenWidth:
+            screenWidth,
+          ),
+
+          SizedBox(
+            height:
+            screenWidth * 0.03,
+          ),
+
+          SizedBox(
+            width:
+            double.infinity,
+            child:
+            ElevatedButton(
+              onPressed:
+              isSending
+                  ? null
+                  : _sendPasswordResetEmail,
+
+              style:
+              ElevatedButton.styleFrom(
+                backgroundColor:
+                Colors.amberAccent,
+                disabledBackgroundColor:
+                Colors.amberAccent
+                    .withOpacity(0.45),
+                foregroundColor:
+                const Color(
+                  0xFF0A1D27,
+                ),
+                elevation: 0,
+                padding:
+                EdgeInsets.symmetric(
+                  vertical:
+                  screenWidth *
+                      0.038,
+                ),
+                shape:
+                RoundedRectangleBorder(
+                  borderRadius:
+                  BorderRadius.circular(
+                    14,
+                  ),
+                ),
+              ),
+
+              child:
+              isSending
+                  ? SizedBox(
+                width:
+                screenWidth *
+                    0.05,
+                height:
+                screenWidth *
+                    0.05,
+                child:
+                const CircularProgressIndicator(
+                  strokeWidth:
+                  2.2,
+                  color:
+                  Color(
+                    0xFF0A1D27,
+                  ),
+                ),
+              )
+                  : Row(
+                mainAxisAlignment:
+                MainAxisAlignment
+                    .center,
+                children: [
+                  Icon(
+                    Icons
+                        .send_rounded,
+                    size:
+                    screenWidth *
+                        0.042,
+                  ),
+
+                  SizedBox(
+                    width:
+                    screenWidth *
+                        0.015,
+                  ),
+
+                  Text(
+                    '재설정 메일 보내기',
+                    style:
+                    TextStyle(
+                      fontFamily:
+                      'kopub',
+                      fontSize:
+                      screenWidth *
+                          0.032,
+                      fontWeight:
+                      FontWeight
+                          .bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          SizedBox(
+            height:
+            screenWidth * 0.025,
+          ),
+
+          Row(
+            crossAxisAlignment:
+            CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.info_outline_rounded,
+                color: Colors.white38,
+                size:
+                screenWidth * 0.035,
+              ),
+
+              SizedBox(
+                width:
+                screenWidth * 0.012,
+              ),
+
+              Expanded(
+                child: Text(
+                  '메일이 보이지 않는다면 스팸함이나 프로모션함도 확인해주세요.',
+                  style: TextStyle(
+                    color:
+                    Colors.white38,
+                    fontFamily:
+                    'kopub',
+                    fontSize:
+                    screenWidth * 0.025,
+                    height: 1.45,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmailGuideCard(
+      double screenWidth,
+      ) {
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.all(
+        screenWidth * 0.04,
+      ),
+      decoration: BoxDecoration(
+        color:
+        Colors.white.withOpacity(0.025),
+        borderRadius:
+        BorderRadius.circular(16),
+        border: Border.all(
+          color:
+          Colors.white.withOpacity(0.055),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment:
+        CrossAxisAlignment.start,
+        children: [
+          Container(
+            width:
+            screenWidth * 0.08,
+            height:
+            screenWidth * 0.08,
+            decoration:
+            BoxDecoration(
+              color: Colors.white
+                  .withOpacity(0.045),
+              borderRadius:
+              BorderRadius.circular(10),
+            ),
+            child: Icon(
+              Icons
+                  .alternate_email_rounded,
+              color: Colors.white54,
+              size:
+              screenWidth * 0.041,
+            ),
+          ),
+
+          SizedBox(
+            width:
+            screenWidth * 0.025,
+          ),
+
+          Expanded(
+            child: Column(
+              crossAxisAlignment:
+              CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '아이디가 기억나지 않나요?',
+                  style: TextStyle(
+                    color:
+                    Colors.white,
+                    fontFamily:
+                    'kopub',
+                    fontSize:
+                    screenWidth * 0.032,
+                    fontWeight:
+                    FontWeight.w600,
+                  ),
+                ),
+
+                SizedBox(
+                  height:
+                  screenWidth * 0.01,
+                ),
+
+                Text(
+                  'Labrary는 가입한 이메일 주소를 아이디로 사용해요.',
+                  style: TextStyle(
+                    color:
+                    Colors.white54,
+                    fontFamily:
+                    'kopub',
+                    fontSize:
+                    screenWidth * 0.027,
+                    height: 1.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -247,124 +606,131 @@ class _FindAccountScreenState extends State<FindAccountScreen> {
   Widget _buildTextField({
     required TextEditingController controller,
     required String hintText,
-    TextInputType keyboardType = TextInputType.text,
-    List<TextInputFormatter>? inputFormatters,
+    required double screenWidth,
+    TextInputType keyboardType =
+        TextInputType.text,
+    List<TextInputFormatter>?
+    inputFormatters,
   }) {
     return TextField(
-      controller: controller,
-      keyboardType: keyboardType,
-      inputFormatters: inputFormatters,
-      style: const TextStyle(color: Colors.white, fontSize: 15),
-      decoration: InputDecoration(
-        hintText: hintText,
-        hintStyle: const TextStyle(color: Colors.white54),
-        border: const UnderlineInputBorder(
-          borderSide: BorderSide(color: Colors.white38),
-        ),
-        enabledBorder: const UnderlineInputBorder(
-          borderSide: BorderSide(color: Colors.white38),
-        ),
-        focusedBorder: const UnderlineInputBorder(
-          borderSide: BorderSide(color: Colors.amberAccent),
-        ),
-      ),
-    );
-  }
-
-  ButtonStyle _buttonStyle() {
-    return ElevatedButton.styleFrom(
-      backgroundColor: Colors.amberAccent,
-      padding: const EdgeInsets.symmetric(vertical: 14),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-      ),
-    );
-  }
-
-  Future<void> _sendOtp() async {
-    final raw = phoneController.text.trim();
-    if (raw.length < 10) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("전화번호를 정확히 입력해주세요(예: 01012345678)")),
-      );
-      return;
-    }
-    final fullPhone = '+82${raw.substring(1)}'; // 010 → +8210
-
-    await FirebaseAuth.instance.verifyPhoneNumber(
-      phoneNumber: fullPhone,
-      timeout: const Duration(seconds: 60),
-
-      forceResendingToken: _resendToken, // ← 연속요청 시 쿨다운 회피에 도움
-
-      verificationCompleted: (PhoneAuthCredential cred) async {
-        // 자동완성 시 바로 검증 성공으로만 사용 (로그인 상태는 남기지 않음)
-        try {
-          await FirebaseAuth.instance.signInWithCredential(cred);
-          setState(() => _otpVerified = true);
-        } finally {
-          await FirebaseAuth.instance.signOut(); // ← 임시 로그인 상태 정리
+      controller:
+      controller,
+      keyboardType:
+      keyboardType,
+      inputFormatters:
+      inputFormatters,
+      enabled:
+      !isSending,
+      textInputAction:
+      TextInputAction.done,
+      onSubmitted:
+          (_) {
+        if (!isSending) {
+          _sendPasswordResetEmail();
         }
       },
-      verificationFailed: (FirebaseAuthException e) {
-        final msg = _mapAuthError(e);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("인증 실패: $msg")));
-      },
-      codeSent: (String verificationId, int? resendToken) {
-        setState(() {
-          _verificationId = verificationId;
-          _resendToken = resendToken; // ← 저장
-          _otpSent = true;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("인증번호를 전송했습니다.")),
-        );
-      },
-      codeAutoRetrievalTimeout: (_) {},
+      style: TextStyle(
+        color:
+        Colors.white,
+        fontFamily:
+        'kopub',
+        fontSize:
+        screenWidth * 0.033,
+      ),
+      cursorColor:
+      Colors.amberAccent,
+      decoration:
+      InputDecoration(
+        hintText:
+        hintText,
+        hintStyle:
+        TextStyle(
+          color:
+          Colors.white38,
+          fontFamily:
+          'kopub',
+          fontSize:
+          screenWidth *
+              0.031,
+        ),
+        prefixIcon:
+        Icon(
+          Icons
+              .mail_outline_rounded,
+          color:
+          Colors.white38,
+          size:
+          screenWidth * 0.045,
+        ),
+        filled:
+        true,
+        fillColor:
+        Colors.black
+            .withOpacity(
+          0.12,
+        ),
+        contentPadding:
+        EdgeInsets.symmetric(
+          horizontal:
+          screenWidth *
+              0.035,
+          vertical:
+          screenWidth *
+              0.034,
+        ),
+        enabledBorder:
+        OutlineInputBorder(
+          borderRadius:
+          BorderRadius.circular(
+            13,
+          ),
+          borderSide:
+          BorderSide(
+            color:
+            Colors.white
+                .withOpacity(
+              0.08,
+            ),
+          ),
+        ),
+        disabledBorder:
+        OutlineInputBorder(
+          borderRadius:
+          BorderRadius.circular(
+            13,
+          ),
+          borderSide:
+          BorderSide(
+            color:
+            Colors.white
+                .withOpacity(
+              0.04,
+            ),
+          ),
+        ),
+        focusedBorder:
+        OutlineInputBorder(
+          borderRadius:
+          BorderRadius.circular(
+            13,
+          ),
+          borderSide:
+          BorderSide(
+            color:
+            Colors.amberAccent
+                .withOpacity(
+              0.75,
+            ),
+          ),
+        ),
+        border:
+        OutlineInputBorder(
+          borderRadius:
+          BorderRadius.circular(
+            13,
+          ),
+        ),
+      ),
     );
-  }
-
-  String _mapAuthError(FirebaseAuthException e) {
-    switch (e.code) {
-      case 'invalid-app-credential':
-      case 'app-not-authorized':
-        return '앱 서명/패키지 정보가 일시적으로 검증되지 않았습니다. 잠시 후 다시 시도해주세요.';
-      case 'captcha-check-failed':
-        return 'reCAPTCHA 확인에 실패했습니다. 다시 시도해주세요.';
-      case 'too-many-requests':
-        return '요청이 너무 많습니다. 잠시 후 다시 시도해주세요.';
-      default:
-        return e.message ?? e.code;
-    }
-  }
-
-  Future<void> _verifyOtp() async {
-    final otp = otpController.text.trim();
-    if (otp.length != 6) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("6자리 인증번호를 입력해주세요.")),
-      );
-      return;
-    }
-
-    try {
-      final cred = PhoneAuthProvider.credential(
-        verificationId: _verificationId,
-        smsCode: otp,
-      );
-      await FirebaseAuth.instance.signInWithCredential(cred);
-      setState(() => _otpVerified = true);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("인증 성공!")),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("인증 실패: $e")),
-      );
-      return;
-    } finally {
-      // 이 화면에서는 로그인 유지 불필요 → 정리
-      await FirebaseAuth.instance.signOut();
-    }
   }
 }

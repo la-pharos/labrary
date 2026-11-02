@@ -129,6 +129,34 @@ class ChallengeProgressUtils {
       data = attempt.recordData ?? {};
     }
 
+    if (challenge.method == ChallengeMethod.timeBased) {
+      final source = data is Map &&
+          (data['dailyMinutes'] is Map ||
+              (data['recordData'] is Map &&
+                  data['recordData']['dailyMinutes'] is Map))
+          ? data
+          : (challenge.currentAttempt?.recordData ?? <String, dynamic>{});
+      return _getTimeBasedTotalMinutes(challenge, source);
+    }
+    if (challenge.method == ChallengeMethod.quantityBased) {
+      List<BookModel>? books;
+      if (data is List<BookModel>) {
+        books = data;
+      } else if (data is Map && data['savedBooks'] is List) {
+        books = (data['savedBooks'] as List).map((b) {
+          if (b is BookModel) return b;
+          if (b is Map) return BookModel.fromMap(Map<String, dynamic>.from(b));
+          return null;
+        }).whereType<BookModel>().toList();
+      }
+      if (books != null) {
+        return _getQuantityBasedCompletedCountFiltered(
+          challenge, books, _resolveTargetBooks(challenge, targetBooksOverride),
+        );
+      }
+      return challenge.currentAttempt?.completedBookIds.length ?? 0;
+    }
+
     switch (action) {
       case ChallengeCheckActionType.libraryAuto:
         {
@@ -196,6 +224,10 @@ class ChallengeProgressUtils {
       dynamic recordDataOrSavedBooks, {
         List<BookModel>? targetBooksOverride,
       }) {
+    if (challenge.method == ChallengeMethod.timeBased) {
+      return challenge.requiredMinutes ?? 0;
+    }
+
     // 스테이지 챌린지: 각 스테이지의 duration을 목표로 사용
     if (challenge.stageType == ChallengeStageType.staged && challenge.attempts.isNotEmpty) {
       final attempt = challenge.attempts.last;
@@ -349,11 +381,14 @@ class ChallengeProgressUtils {
         .toSet();
 
     return savedBooks.where((book) {
-      if (book.category != 'done') return false;
-      final date = book.readDate;
+      // Provider와 동일한 완독일 기준 사용
+      final date = book.endDate;
+      if (date == null) return false;
       if (start != null && end != null) {
-        if (date == null) return false;
-        if (date.isBefore(start) || date.isAfter(end)) return false;
+        final day = DateTime(date.year, date.month, date.day);
+        final from = DateTime(start.year, start.month, start.day);
+        final to = DateTime(end.year, end.month, end.day);
+        if (day.isBefore(from) || day.isAfter(to)) return false;
       }
       final k = _keyForBook(book);
       // 타겟이 비어있으면 전체, 비어있지 않으면 타겟에 포함된 것만
@@ -361,29 +396,109 @@ class ChallengeProgressUtils {
     }).length;
   }
 
+  /// timeBased: 시스템 주간 시작일~종료일의 모든 읽기 시간을 합산.
+  /// 참여 날짜는 기준으로 사용하지 않는다.
+  static int _getTimeBasedTotalMinutes(Challenge challenge, Map data) {
+    final raw = data['recordData'] is Map
+        ? (data['recordData'] as Map)['dailyMinutes']
+        : data['dailyMinutes'];
+    if (raw is! Map) return 0;
+    final attempt = challenge.currentAttempt;
+    if (attempt == null) return 0;
+    final start = challenge.startDate ?? attempt.startDate;
+    final end = challenge.endDate ?? attempt.endDate;
+    if (end == null) return 0;
+    final from = DateTime(start.year, start.month, start.day);
+    final to = DateTime(end.year, end.month, end.day);
+    var total = 0;
+    for (final entry in raw.entries) {
+      final day = DateTime.tryParse(entry.key.toString());
+      if (day == null) continue;
+      final localDay = DateTime(day.year, day.month, day.day);
+      if (localDay.isBefore(from) || localDay.isAfter(to)) continue;
+      final value = int.tryParse(entry.value.toString()) ?? 0;
+      if (value > 0) total += value;
+    }
+    return total;
+  }
+
   /// ✅ timerAuto 완료 일수
-  static int _getTimerCompletedCount(Challenge challenge, Map<String, dynamic> data) {
+  /// - 날짜만 비교하여 시작일의 기록 누락 방지
+  /// - 현재 Attempt의 기간 안에서만 집계
+  /// - 하루 필수 독서시간 이상인 날짜만 인정
+  static int _getTimerCompletedCount(
+      Challenge challenge,
+      Map<String, dynamic> data,
+      ) {
     Map<String, dynamic> rawMinutes = {};
 
-    if (data['recordData'] is Map && data['recordData']['dailyMinutes'] is Map) {
-      rawMinutes = Map<String, dynamic>.from(data['recordData']['dailyMinutes']);
+    if (data['recordData'] is Map &&
+        data['recordData']['dailyMinutes'] is Map) {
+      rawMinutes = Map<String, dynamic>.from(
+        data['recordData']['dailyMinutes'],
+      );
     } else if (data['dailyMinutes'] is Map) {
-      rawMinutes = Map<String, dynamic>.from(data['dailyMinutes']);
+      rawMinutes = Map<String, dynamic>.from(
+        data['dailyMinutes'],
+      );
     }
 
-    final required = challenge.requiredMinutes ?? 0;
-    final minutesMap = rawMinutes.map((k, v) => MapEntry(k, int.tryParse(v.toString()) ?? 0));
+    final attempt = challenge.attempts.isNotEmpty
+        ? challenge.attempts.last
+        : null;
 
-    final attempt = challenge.attempts.isNotEmpty ? challenge.attempts.last : null;
-    final startDate = attempt?.startDate;
-    if (startDate == null) return 0;
+    if (attempt == null) return 0;
 
-    return minutesMap.entries.where((entry) {
+    final duration = attempt.selectedDuration ?? 1;
+    final requiredMinutes = challenge.requiredMinutes ?? 0;
+
+    if (duration <= 0 || requiredMinutes <= 0) {
+      return 0;
+    }
+
+    // 시작일의 시간 제거
+    final startDate = DateTime(
+      attempt.startDate.year,
+      attempt.startDate.month,
+      attempt.startDate.day,
+    );
+
+    // 시작일을 1일 차로 계산
+    final endDate = DateTime(
+      startDate.year,
+      startDate.month,
+      startDate.day + duration - 1,
+    );
+
+    int completedDays = 0;
+
+    for (final entry in rawMinutes.entries) {
       final parsedDate = DateTime.tryParse(entry.key);
-      if (parsedDate == null) return false;
-      return !parsedDate.isBefore(DateTime(startDate.year, startDate.month, startDate.day)) &&
-          entry.value >= required;
-    }).length;
+
+      if (parsedDate == null) continue;
+
+      // 기록 날짜의 시간 제거
+      final recordDate = DateTime(
+        parsedDate.year,
+        parsedDate.month,
+        parsedDate.day,
+      );
+
+      // 도전 기간에 포함된 날짜만 인정
+      if (recordDate.isBefore(startDate) ||
+          recordDate.isAfter(endDate)) {
+        continue;
+      }
+
+      final minutes =
+          int.tryParse(entry.value.toString()) ?? 0;
+
+      if (minutes >= requiredMinutes) {
+        completedDays++;
+      }
+    }
+
+    return completedDays;
   }
 
   /// ✅ manual 체크 완료
@@ -440,11 +555,24 @@ class ChallengeProgressUtils {
           ? challenge.stageDurations![stageIndex]
           : null;
 
-      final startDate = attempt.startDate;
-      if (startDate == null || duration == null) return false;
+      if (duration == null || duration <= 0) {
+        return false;
+      }
 
-      final endDate = startDate.add(Duration(days: duration - 1));
+      final startDate = DateTime(
+        attempt.startDate.year,
+        attempt.startDate.month,
+        attempt.startDate.day,
+      );
+
+      final endDate = DateTime(
+        startDate.year,
+        startDate.month,
+        startDate.day + duration - 1,
+      );
+
       final isExpired = today.isAfter(endDate);
+
       final isIncomplete = !_isCurrentStageCompleted(
         challenge,
         recordDataOrSavedBooks,

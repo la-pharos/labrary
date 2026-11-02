@@ -9,12 +9,26 @@ import 'package:dayverse_book/model/book_model.dart';
 import 'package:dayverse_book/constants/dummy_book_list.dart';
 import 'package:dayverse_book/widget/login_please_dialog.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:dayverse_book/widget/card_box.dart';
+import 'dart:math' as math;
 
+import 'package:dayverse_book/widget/book_spine_widget.dart';
+import 'package:dayverse_book/service/yes24_book_service.dart';
 
 enum DoneBookSortOption { newest, rating }
 
+enum LibraryBookDisplayType {
+  cover,
+  spine,
+}
+
 class LibraryScreen extends StatefulWidget {
-  const LibraryScreen({super.key});
+  final void Function(int index)? onNavigateMainTab;
+
+  const LibraryScreen({
+    super.key,
+    this.onNavigateMainTab,
+  });
 
   @override
   LibraryScreenState createState() => LibraryScreenState();
@@ -24,6 +38,32 @@ class LibraryScreenState extends State<LibraryScreen> {
   final PageController _pageController = PageController();
   int _currentPage = 0;
   DoneBookSortOption _doneBookSortOption = DoneBookSortOption.newest;
+
+  bool _didTriggerMainTabNavigation = false;
+
+  bool _librariesLoaded = false;
+
+  LibraryBookDisplayType _bookDisplayType =
+      LibraryBookDisplayType.spine;
+
+  bool _isLoadingLibrarySpines = false;
+
+  @override
+  void initState() {
+    super.initState();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await context
+          .read<CustomLibraryProvider>()
+          .fetchLibraries();
+
+      if (!mounted) return;
+
+      setState(() {
+        _librariesLoaded = true;
+      });
+    });
+  }
 
   void goToOverviewPage() {
     setState(() {
@@ -41,35 +81,87 @@ class LibraryScreenState extends State<LibraryScreen> {
     final savedBooks = Provider.of<SavedBooksProvider>(context).savedBooks;
 
 
-    if (provider.orderedLibraryNames.isEmpty && !provider.isLibraryBeingCreated) {
-      Future.microtask(() => provider.fetchLibraries());
-    }
 
     final customLibraries = provider.orderedLibraryNames;
     final totalPages = 4 + customLibraries.length;
 
     return Scaffold(
       backgroundColor: const Color(0xFF013328),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      body: Stack(
         children: [
-          SizedBox(height: screenHeight * 0.055),
-          _buildTopNavigationBar(screenWidth, savedBooks, customLibraries),
-          Expanded(
-            child: PageView.builder(
-              controller: _pageController,
-              itemCount: totalPages + 1,
-              onPageChanged: (index) => setState(() => _currentPage = index),
-              itemBuilder: (context, index) {
-                if (index == 0) return _buildLibraryOverviewPage();
-                if (index >= 1 && index <= 4) return _buildBookPage(index);
-                if (index < 5 + customLibraries.length)
-                  return _buildCustomLibraryPage(customLibraries[index - 5]);
-                return _buildAddLibraryPage();
-              },
-            ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+
+              SizedBox(height: screenHeight * 0.055),
+              _buildTopNavigationBar(screenWidth, savedBooks, customLibraries),
+              Expanded(
+                child: NotificationListener<ScrollNotification>(
+                  onNotification: (notification) {
+                    final lastPageIndex = totalPages;
+
+                    if (notification is OverscrollNotification) {
+                      if (_didTriggerMainTabNavigation) return false;
+
+                      // Library 첫 페이지에서 오른쪽으로 더 당기면 Home 탭으로 이동
+                      if (_currentPage == 0 && notification.overscroll < -8) {
+                        _didTriggerMainTabNavigation = true;
+                        widget.onNavigateMainTab?.call(0);
+                        return true;
+                      }
+
+                      // Library 마지막 페이지에서 왼쪽으로 더 밀면 Challenge 탭으로 이동
+                      if (_currentPage == lastPageIndex && notification.overscroll > 8) {
+                        _didTriggerMainTabNavigation = true;
+                        widget.onNavigateMainTab?.call(2);
+                        return true;
+                      }
+                    }
+
+                    if (notification is ScrollEndNotification) {
+                      _didTriggerMainTabNavigation = false;
+                    }
+
+                    return false;
+                  },
+                  child: PageView.builder(
+                    controller: _pageController,
+                    itemCount: totalPages + 1,
+                    onPageChanged: (index) {
+                      setState(() {
+                        _currentPage = index;
+                      });
+
+                      if (_bookDisplayType ==
+                          LibraryBookDisplayType.spine &&
+                          index > 0) {
+                        WidgetsBinding.instance
+                            .addPostFrameCallback((_) {
+                          if (!mounted) return;
+
+                          _loadLibrarySpines(
+                            _getBooksForCurrentPage(),
+                          );
+                        });
+                      }
+                    },
+                    itemBuilder: (context, index) {
+                      if (index == 0) return _buildLibraryOverviewPage();
+                      if (index >= 1 && index <= 4) return _buildBookPage(index);
+                      if (index < 5 + customLibraries.length) {
+                        return _buildCustomLibraryPage(customLibraries[index - 5]);
+                      }
+                      return _buildAddLibraryPage();
+                    },
+                  ),
+                ),
+              ),
+              SizedBox(height: screenHeight * 0.055),
+            ],
           ),
+
           _buildPageIndicator(totalPages + 1),
+
         ],
       ),
     );
@@ -79,7 +171,9 @@ class LibraryScreenState extends State<LibraryScreen> {
   Widget _buildTopNavigationBar(double screenWidth,List<BookModel> savedBooks, List<String> customLibraries) {
     final screenWidth = MediaQuery.of(context).size.width;
     final allCategories = ["전체", "읽은 책", "읽는 중인 책", "읽을 예정인 책", ...customLibraries];
-    final bool isCustom = _currentPage >= 5;
+    final bool isCustom =
+        _currentPage >= 5 &&
+            _currentPage < 5 + customLibraries.length;
     final bool isHome = _currentPage == 0;
 
     final String currentCategory = _currentPage > 0 && _currentPage <= allCategories.length
@@ -104,7 +198,7 @@ class LibraryScreenState extends State<LibraryScreen> {
               fontFamily: 'kopub',
               fontSize: screenWidth * 0.045,
               fontWeight: FontWeight.w600,
-              letterSpacing: 1.6,
+              letterSpacing: 1.4,
             ),
           )
               : Expanded(
@@ -114,16 +208,20 @@ class LibraryScreenState extends State<LibraryScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Flexible(
-                    child: Text(
-                      "$currentCategory ($bookCount권)",
-                      overflow: TextOverflow.ellipsis,
-                      maxLines: 1,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontFamily: 'kopub',
-                        fontSize: 20,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 1.5,
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      physics: const BouncingScrollPhysics(),
+                      child: Text(
+                        "$currentCategory ($bookCount권)",
+                        maxLines: 1,
+                        softWrap: false,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontFamily: 'kopub',
+                          fontSize: 20,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 1.5,
+                        ),
                       ),
                     ),
                   ),
@@ -150,11 +248,69 @@ class LibraryScreenState extends State<LibraryScreen> {
                   onPressed: _showAddLibraryDialog,
                 ),
               ] else ...[
+                if (_currentPage <= 4 || isCustom)
+                  IconButton(
+                    icon: const Icon(
+                      Icons.add_rounded,
+                      color: Colors.white,
+                    ),
+                    tooltip: '책 추가하기',
+                    onPressed: () {
+                      _handleAddBookPressed(
+                        customLibraries,
+                      );
+                    },
+                  ),
+
                 IconButton(
-                  icon: const Icon(Icons.search, color: Colors.white),
-                  tooltip: "책 검색",
-                  onPressed: () => _handleSearchPressed(currentCategory),
+                  icon: const Icon(
+                    Icons.search,
+                    color: Colors.white,
+                  ),
+                  tooltip: '서재 내 책 검색',
+                  onPressed: () {
+                    _handleSearchPressed(
+                      currentCategory,
+                    );
+                  },
                 ),
+
+                IconButton(
+                  icon: Icon(
+                    _bookDisplayType ==
+                        LibraryBookDisplayType.cover
+                        ? Icons.view_column_rounded
+                        : Icons.grid_view_rounded,
+                    color: Colors.white,
+                  ),
+                  tooltip:
+                  _bookDisplayType ==
+                      LibraryBookDisplayType.cover
+                      ? '책등으로 보기'
+                      : '표지로 보기',
+                  onPressed: () async {
+                    final nextType =
+                    _bookDisplayType ==
+                        LibraryBookDisplayType.cover
+                        ? LibraryBookDisplayType.spine
+                        : LibraryBookDisplayType.cover;
+
+                    setState(() {
+                      _bookDisplayType = nextType;
+                    });
+
+                    if (nextType ==
+                        LibraryBookDisplayType.spine) {
+                      final books =
+                      _getBooksForCurrentPage();
+
+                      await _loadLibrarySpines(
+                        books,
+                      );
+                    }
+                  },
+                ),
+
                 if (_currentPage == 2)
                   PopupMenuButton<DoneBookSortOption>(
                     icon: const Icon(Icons.sort, color: Colors.white),
@@ -215,10 +371,342 @@ class LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
-  void _navigateToBookSearch() {
-    Navigator.push(
+  List<BookModel> _getBooksForCurrentPage() {
+    final savedBooks =
+        context
+            .read<SavedBooksProvider>()
+            .savedBooks;
+
+    if (_currentPage == 1) {
+      return List<BookModel>.from(
+        savedBooks,
+      );
+    }
+
+    if (_currentPage == 2) {
+      final books = savedBooks
+          .where(
+            (book) =>
+        book.category == 'done',
+      )
+          .toList();
+
+      if (_doneBookSortOption ==
+          DoneBookSortOption.rating) {
+        books.sort(
+              (a, b) =>
+              (b.rating ?? 0).compareTo(
+                a.rating ?? 0,
+              ),
+        );
+      }
+
+      return books;
+    }
+
+    if (_currentPage == 3) {
+      return savedBooks
+          .where(
+            (book) =>
+        book.category == 'reading',
+      )
+          .toList();
+    }
+
+    if (_currentPage == 4) {
+      return savedBooks
+          .where(
+            (book) =>
+        book.category == 'want',
+      )
+          .toList();
+    }
+
+    if (_currentPage >= 5) {
+      final provider =
+      context.read<
+          CustomLibraryProvider>();
+
+      final customLibraries =
+          provider.orderedLibraryNames;
+
+      final index =
+          _currentPage - 5;
+
+      if (index < 0 ||
+          index >= customLibraries.length) {
+        return [];
+      }
+
+      final libraryName =
+      customLibraries[index];
+
+      final ids =
+          provider.libraries[libraryName] ??
+              [];
+
+      return savedBooks
+          .where(
+            (book) =>
+            ids.contains(book.id),
+      )
+          .toList();
+    }
+
+    return [];
+  }
+
+  Future<void> _navigateToBookSearch({
+    String? initialCategory,
+    String? targetCustomLibrary,
+  }) async {
+    await Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => const BookSearchScreen()),
+      MaterialPageRoute(
+        builder: (_) => BookSearchScreen(
+          initialCategory: initialCategory,
+          targetCustomLibrary:
+          targetCustomLibrary,
+        ),
+      ),
+    );
+
+    if (!mounted) return;
+
+    setState(() {});
+  }
+
+  void _handleAddBookPressed(
+      List<String> customLibraries,
+      ) {
+    switch (_currentPage) {
+      case 1:
+      // 전체 서재
+        _navigateToBookSearch();
+        break;
+
+      case 2:
+      // 읽은 책
+        _navigateToBookSearch(
+          initialCategory: 'done',
+        );
+        break;
+
+      case 3:
+      // 읽는 중인 책
+        _navigateToBookSearch(
+          initialCategory: 'reading',
+        );
+        break;
+
+      case 4:
+      // 읽을 예정인 책
+        _navigateToBookSearch(
+          initialCategory: 'want',
+        );
+        break;
+
+      default:
+        if (_currentPage >= 5 &&
+            _currentPage <
+                5 + customLibraries.length) {
+          final libraryName =
+          customLibraries[_currentPage - 5];
+
+          _showCustomLibraryAddOptions(
+            libraryName,
+          );
+        }
+    }
+  }
+
+  void _showCustomLibraryAddOptions(
+      String libraryName,
+      ) {
+    final screenWidth =
+        MediaQuery.of(context).size.width;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor:
+      const Color(0xFF1B2C2E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(20),
+        ),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              screenWidth * 0.04,
+              screenWidth * 0.05,
+              screenWidth * 0.04,
+              screenWidth * 0.04,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment:
+              CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '서재에 책 추가',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontFamily: 'kopub',
+                    fontSize:
+                    screenWidth * 0.045,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+
+                SizedBox(
+                  height: screenWidth * 0.012,
+                ),
+
+                Text(
+                  '「$libraryName」 서재에 추가할 방법을 선택하세요.',
+                  style: TextStyle(
+                    color: Colors.white60,
+                    fontFamily: 'kopub',
+                    fontSize:
+                    screenWidth * 0.032,
+                  ),
+                ),
+
+                SizedBox(
+                  height: screenWidth * 0.045,
+                ),
+
+                _buildCustomLibraryAddOption(
+                  icon:
+                  Icons.add_circle_outline_rounded,
+                  title: '새로운 책 등록',
+                  description:
+                  '책을 검색하거나 직접 등록해요.',
+                  screenWidth: screenWidth,
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+
+                    _navigateToBookSearch(
+                      targetCustomLibrary:
+                      libraryName,
+                    );
+                  },
+                ),
+
+                SizedBox(
+                  height: screenWidth * 0.025,
+                ),
+
+                _buildCustomLibraryAddOption(
+                  icon:
+                  Icons.library_books_outlined,
+                  title: '내 서재에서 선택',
+                  description:
+                  '이미 등록한 책을 이 서재에 추가해요.',
+                  screenWidth: screenWidth,
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+
+                    _showAddBooksToLibraryDialog(
+                      libraryName,
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildCustomLibraryAddOption({
+    required IconData icon,
+    required String title,
+    required String description,
+    required double screenWidth,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.white.withOpacity(0.07),
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Padding(
+          padding: EdgeInsets.all(
+            screenWidth * 0.035,
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: screenWidth * 0.12,
+                height: screenWidth * 0.12,
+                decoration: BoxDecoration(
+                  color: Colors.amberAccent
+                      .withOpacity(0.12),
+                  borderRadius:
+                  BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  icon,
+                  color: Colors.amberAccent,
+                  size: screenWidth * 0.06,
+                ),
+              ),
+
+              SizedBox(
+                width: screenWidth * 0.03,
+              ),
+
+              Expanded(
+                child: Column(
+                  crossAxisAlignment:
+                  CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontFamily: 'kopub',
+                        fontSize:
+                        screenWidth * 0.036,
+                        fontWeight:
+                        FontWeight.bold,
+                      ),
+                    ),
+
+                    SizedBox(
+                      height:
+                      screenWidth * 0.01,
+                    ),
+
+                    Text(
+                      description,
+                      style: TextStyle(
+                        color: Colors.white60,
+                        fontFamily: 'kopub',
+                        fontSize:
+                        screenWidth * 0.029,
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              Icon(
+                Icons.chevron_right_rounded,
+                color: Colors.white38,
+                size: screenWidth * 0.055,
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -376,108 +864,220 @@ class LibraryScreenState extends State<LibraryScreen> {
 
   /// 대표 페이지
   Widget _buildLibraryOverviewPage() {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final screenHeight = MediaQuery.of(context).size.height;
+    final screenWidth =
+        MediaQuery.of(context).size.width;
+    final screenHeight =
+        MediaQuery.of(context).size.height;
 
-    final savedBooks = Provider.of<SavedBooksProvider>(context).savedBooks;
-    final provider = Provider.of<CustomLibraryProvider>(context);
-    final customLibraries = provider.libraries;
-    final orderedNames = provider.orderedLibraryNames;
-    final defaultCategories = ["전체", "읽은 책", "읽는 중인 책", "읽을 예정인 책"];
+    final savedBooks =
+        Provider.of<SavedBooksProvider>(context)
+            .savedBooks;
 
-    List<Map<String, dynamic>> defaultItems = List.generate(defaultCategories.length, (i) {
-      return {
-        "name": defaultCategories[i],
-        "index": i + 1,
-        "count": _getBookCountForPage(savedBooks, customLibraries.keys.toList(), index: i + 1),
-        "isCustom": false,
-      };
-    });
+    final provider =
+    Provider.of<CustomLibraryProvider>(context);
 
-    List<Map<String, dynamic>> customItems = List.generate(orderedNames.length, (index) {
-      final name = orderedNames[index];
-      final count = _getBookCountForPage(savedBooks, customLibraries.keys.toList(), index: 5 + index);
-      return {
-        "name": name,
-        "index": 5 + index,
-        "count": count,
-        "isCustom": true,
-      };
-    });
+    final customLibraries =
+        provider.libraries;
 
-    List<Map<String, dynamic>> allItems = [...defaultItems, ...customItems];
+    final orderedNames =
+        provider.orderedLibraryNames;
+
+    final defaultCategories = [
+      "전체",
+      "읽은 책",
+      "읽는 중인 책",
+      "읽을 예정인 책",
+    ];
+
+    final defaultItems =
+    List<Map<String, dynamic>>.generate(
+      defaultCategories.length,
+          (i) {
+        return {
+          "name": defaultCategories[i],
+          "index": i + 1,
+          "count": _getBookCountForPage(
+            savedBooks,
+            orderedNames,
+            index: i + 1,
+          ),
+          "isCustom": false,
+        };
+      },
+    );
 
     return GestureDetector(
-      onTap: () => FocusScope.of(context).unfocus(),
-      child: SizedBox( // ✅ Fixed!
-        height: MediaQuery.of(context).size.height * 0.85, // 또는 double.infinity
-        child: SingleChildScrollView(
-          padding: EdgeInsets.symmetric(horizontal: screenWidth * 0.05),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.start,
-            children: [
-              GridView.count(
-                crossAxisCount: screenWidth > 600 ? 3 : 2,
-                crossAxisSpacing: screenWidth * 0.03,
-                mainAxisSpacing: screenWidth * 0.03,
+      onTap: () =>
+          FocusScope.of(context).unfocus(),
+      child: CustomScrollView(
+        slivers: [
+          SliverPadding(
+            padding: EdgeInsets.fromLTRB(
+              screenWidth * 0.05,
+              screenHeight * 0.025,
+              screenWidth * 0.05,
+              0,
+            ),
+            sliver: SliverGrid(
+              gridDelegate:
+              SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount:
+                screenWidth > 600 ? 3 : 2,
+                crossAxisSpacing:
+                screenWidth * 0.03,
+                mainAxisSpacing:
+                screenWidth * 0.03,
                 childAspectRatio: 1,
-                physics: const NeverScrollableScrollPhysics(),
-                shrinkWrap: true,
-                children: defaultItems.map((item) => _buildLibraryCard(
-                  item,
-                  titleSize: screenWidth * 0.04,
-                  countSize: screenWidth * 0.035,
-                )).toList(),
               ),
+              delegate:
+              SliverChildBuilderDelegate(
+                    (context, index) {
+                  final item =
+                  defaultItems[index];
 
-              SizedBox(height: screenHeight * 0.02),
-
-              if (orderedNames.isNotEmpty) ...[
-                const Divider(color: Colors.white30, thickness: 0.8),
-
-                ReorderableListView(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  onReorder: (oldIndex, newIndex) {
-                    if (oldIndex < newIndex) newIndex -= 1;
-                    Provider.of<CustomLibraryProvider>(context, listen: false)
-                        .reorderLibrary(oldIndex, newIndex);
-                  },
-                  children: List.generate(orderedNames.length, (index) {
-                    final name = orderedNames[index];
-                    final ids = customLibraries[name] ?? [];
-                    final count = savedBooks.where((b) => ids.contains(b.id)).length;
-
-                    return ListTile(
-                      key: ValueKey('custom_library_${index}_$name'),
-                      contentPadding: EdgeInsets.symmetric(vertical: screenHeight * 0.005),
-                      title: Text(
-                        name,
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: screenWidth * 0.055,
-                          fontFamily: 'kopub',
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      subtitle: Text(
-                        "$count권",
-                        style: TextStyle(
-                          color: Colors.white54,
-                          fontSize: screenWidth * 0.04,
-                          fontFamily: 'kopub',
-                        ),
-                      ),
-                      trailing: const Icon(Icons.drag_handle, color: Colors.white70),
-                      onTap: () => _onLibraryTap(name),
-                    );
-                  }),
-                ),
-              ],
-              SizedBox(height: screenHeight * 0.1),
-            ],
+                  return _buildLibraryCard(
+                    item,
+                    titleSize:
+                    screenWidth * 0.04,
+                    countSize:
+                    screenWidth * 0.035,
+                  );
+                },
+                childCount:
+                defaultItems.length,
+              ),
+            ),
           ),
-        ),
+
+          SliverToBoxAdapter(
+            child: SizedBox(
+              height:
+              screenHeight * 0.025,
+            ),
+          ),
+
+          if (_librariesLoaded)
+            SliverPadding(
+              padding: EdgeInsets.symmetric(
+                horizontal:
+                screenWidth * 0.05,
+              ),
+              sliver: SliverToBoxAdapter(
+                child: const Divider(
+                  color: Colors.white30,
+                  thickness: 0.8,
+                ),
+              ),
+            ),
+
+          if (_librariesLoaded)
+            SliverToBoxAdapter(
+              child: SizedBox(
+                height:
+                screenHeight * 0.018,
+              ),
+            ),
+
+          // =================================================
+          // 커스텀 서재가 아직 없는 경우
+          // =================================================
+          if (_librariesLoaded &&
+              orderedNames.isEmpty)
+            SliverPadding(
+              padding: EdgeInsets.symmetric(
+                horizontal:
+                screenWidth * 0.05,
+              ),
+              sliver: SliverToBoxAdapter(
+                child:
+                _buildEmptyCustomLibraryCard(),
+              ),
+            ),
+
+          // =================================================
+          // 실제 커스텀 서재
+          // =================================================
+          if (_librariesLoaded &&
+              orderedNames.isNotEmpty)
+            SliverPadding(
+              padding: EdgeInsets.symmetric(
+                horizontal:
+                screenWidth * 0.05,
+              ),
+              sliver: SliverReorderableList(
+                itemCount:
+                orderedNames.length,
+
+                onReorder:
+                    (oldIndex, newIndex) async {
+                  if (oldIndex <
+                      newIndex) {
+                    newIndex -= 1;
+                  }
+
+                  await context
+                      .read<
+                      CustomLibraryProvider>()
+                      .reorderLibrary(
+                    oldIndex,
+                    newIndex,
+                  );
+                },
+
+                itemBuilder:
+                    (context, index) {
+                  final name =
+                  orderedNames[index];
+
+                  final ids =
+                      customLibraries[name] ??
+                          [];
+
+                  final count =
+                      savedBooks
+                          .where(
+                            (book) =>
+                            ids.contains(
+                              book.id,
+                            ),
+                      )
+                          .length;
+
+                  return Padding(
+                    key: ValueKey(
+                      'custom_library_card_$name',
+                    ),
+                    padding:
+                    EdgeInsets.only(
+                      bottom:
+                      screenHeight *
+                          0.015,
+                    ),
+                    child:
+                    _buildCustomLibraryCard(
+                      libraryName: name,
+                      count: count,
+                      index: index,
+                      onTap: () =>
+                          _onLibraryTap(
+                            name,
+                          ),
+                      onSettingsTap: () =>
+                          _openLibrarySettings(
+                            name,
+                          ),
+                    ),
+                  );
+                },
+              ),
+            ),
+
+          SliverToBoxAdapter(
+            child: SizedBox(
+              height: 120,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -489,46 +1089,231 @@ class LibraryScreenState extends State<LibraryScreen> {
       }) {
     final screenWidth = MediaQuery.of(context).size.width;
 
-    return GestureDetector(
+    return CardBox(
       onTap: () {
         setState(() {
-          _currentPage = item["index"];
-          _pageController.jumpToPage(item["index"]);
+          _currentPage = item['index'];
+          _pageController.jumpToPage(item['index']);
         });
       },
-      child: Container(
-        padding: EdgeInsets.all(screenWidth * 0.04),
-        decoration: BoxDecoration(
-          color: Colors.white10,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              item["name"],
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white,
-                fontFamily: 'kopub',
-                fontWeight: FontWeight.bold,
-                fontSize: titleSize,
+      margin: EdgeInsets.zero,
+      padding: EdgeInsets.all(screenWidth * 0.04),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            item['name'],
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white,
+              fontFamily: 'kopub',
+              fontWeight: FontWeight.bold,
+              fontSize: titleSize,
+            ),
+          ),
+
+          SizedBox(height: screenWidth * 0.015),
+
+          Text(
+            '${item['count']}권',
+            style: TextStyle(
+              color: Colors.white70,
+              fontFamily: 'kopub',
+              fontWeight: FontWeight.w500,
+              fontSize: countSize,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyCustomLibraryCard() {
+    final screenWidth =
+        MediaQuery.of(context).size.width;
+    final screenHeight =
+        MediaQuery.of(context).size.height;
+
+    return CardBox(
+      onTap: _showAddLibraryDialog,
+      margin: EdgeInsets.zero,
+      padding: EdgeInsets.all(
+        screenWidth * 0.025,
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: screenWidth * 0.14,
+            height: screenWidth * 0.14,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.07),
+              borderRadius: BorderRadius.circular(
+                screenWidth * 0.02,
               ),
             ),
-            const SizedBox(height: 6),
-            Text(
-              "${item["count"]}권",
-              style: TextStyle(
-                color: Colors.white70,
-                fontFamily: 'kopub',
-                fontWeight: FontWeight.w500,
-                fontSize: countSize,
+            child: Icon(
+              Icons.create_new_folder_outlined,
+              color: Colors.white70,
+              size: screenWidth * 0.065,
+            ),
+          ),
+
+          SizedBox(
+            width: screenWidth * 0.03,
+          ),
+
+          Expanded(
+            child: Column(
+              crossAxisAlignment:
+              CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '나만의 서재를 만들어보세요',
+                  maxLines: 1,
+                  overflow:
+                  TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize:
+                    screenWidth * 0.038,
+                    fontWeight:
+                    FontWeight.bold,
+                    fontFamily: 'kopub',
+                  ),
+                ),
+
+                SizedBox(
+                  height:
+                  screenHeight * 0.004,
+                ),
+
+                Text(
+                  '원하는 책을 자유롭게 정리해보세요',
+                  maxLines: 1,
+                  overflow:
+                  TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white60,
+                    fontSize:
+                    screenWidth * 0.031,
+                    fontFamily: 'kopub',
+                    fontWeight:
+                    FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          SizedBox(
+            width: screenWidth * 0.02,
+          ),
+
+          Container(
+            width: screenWidth * 0.075,
+            height: screenWidth * 0.075,
+            decoration: BoxDecoration(
+              color: Colors.white
+                  .withOpacity(0.07),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.chevron_right_rounded,
+              color: Colors.white60,
+              size: screenWidth * 0.05,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCustomLibraryCard({
+    required String libraryName,
+    required int count,
+    required int index,
+    required VoidCallback onTap,
+    required VoidCallback onSettingsTap,
+  }) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.of(context).size.height;
+
+    return CardBox(
+      onTap: onTap,
+      margin: EdgeInsets.zero,
+      padding: EdgeInsets.all(screenWidth * 0.025),
+      child: Row(
+        children: [
+          Container(
+            width: screenWidth * 0.14,
+            height: screenWidth * 0.14,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.07),
+              borderRadius: BorderRadius.circular(
+                screenWidth * 0.02,
               ),
             ),
-          ],
-        ),
+            child: Icon(
+              Icons.folder_open_rounded,
+              color: Colors.white70,
+              size: screenWidth * 0.065,
+            ),
+          ),
+
+          SizedBox(width: screenWidth * 0.03),
+
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  libraryName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: screenWidth * 0.038,
+                    fontWeight: FontWeight.bold,
+                    fontFamily: 'kopub',
+                  ),
+                ),
+
+                SizedBox(height: screenHeight * 0.004),
+
+                Text(
+                  '$count권',
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: screenWidth * 0.034,
+                    fontFamily: 'kopub',
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          SizedBox(width: screenWidth * 0.02),
+
+          ReorderableDragStartListener(
+            index: index,
+            child: Container(
+              width: screenWidth * 0.075,
+              height: screenWidth * 0.075,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.07),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.drag_handle_rounded,
+                color: Colors.white60,
+                size: screenWidth * 0.05,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -571,9 +1356,17 @@ class LibraryScreenState extends State<LibraryScreen> {
                 if (name.isEmpty) return;
 
                 final user = FirebaseAuth.instance.currentUser;
-                if (user == null || user.isAnonymous) {
+
+                if (user == null) {
                   Navigator.pop(context);
-                  await showLoginRequiredDialog(context);
+
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        '사용자 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.',
+                      ),
+                    ),
+                  );
                   return;
                 }
 
@@ -625,7 +1418,7 @@ class LibraryScreenState extends State<LibraryScreen> {
                         style: TextStyle(color: Colors.redAccent, fontFamily: 'kopub'),
                       ),
                       content: const Text(
-                        "최대 3개의 서재만 생성할 수 있어요.\n프리미엄 업그레이드 시 무제한 생성이 가능합니다.",
+                        "최대 3개의 서재만 생성할 수 있어요.\n프리미엄 업그레이드 시 나만의 서재\n무제한 생성이 가능합니다.",
                         style: TextStyle(color: Colors.white70, fontFamily: 'kopub'),
                       ),
                       actions: [
@@ -685,18 +1478,28 @@ class LibraryScreenState extends State<LibraryScreen> {
 
   /// 하단 인디케이터
   Widget _buildPageIndicator(int count) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 15),
+    final bottomSafeArea = MediaQuery.of(context).padding.bottom;
+
+    return Positioned(
+      left: 0,
+      right: 0,
+      bottom: bottomSafeArea + 10,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: List.generate(count, (index) {
-          return Container(
-            width: 10,
-            height: 10,
+          final isActive = _currentPage == index;
+
+          return AnimatedContainer(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            width: isActive ? 10 : 9,
+            height: isActive ? 10 : 9,
             margin: const EdgeInsets.symmetric(horizontal: 5),
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: _currentPage == index ? Colors.white : Colors.white24,
+              color: isActive
+                  ? Colors.white
+                  : Colors.white.withOpacity(0.28),
             ),
           );
         }),
@@ -725,7 +1528,9 @@ class LibraryScreenState extends State<LibraryScreen> {
         filteredBooks = savedBooks;
     }
 
-    return _buildBookGrid(filteredBooks);
+    return _buildBooksView(
+      filteredBooks,
+    );
   }
 
   // 서재 생성 중 클릭 불가 처리
@@ -740,33 +1545,604 @@ class LibraryScreenState extends State<LibraryScreen> {
     final savedBooks = Provider.of<SavedBooksProvider>(context).savedBooks;
     final bookIds = provider.libraries[libraryName] ?? [];
     final filteredBooks = savedBooks.where((b) => bookIds.contains(b.id)).toList();
-    return _buildBookGrid(filteredBooks);
+    return _buildBooksView(
+      filteredBooks,
+    );
+  }
+
+  Widget _buildBooksView(
+      List<BookModel> books,
+      ) {
+    if (_bookDisplayType ==
+        LibraryBookDisplayType.spine) {
+      return _buildBookSpineView(
+        books,
+      );
+    }
+
+    return _buildBookGrid(
+      books,
+    );
+  }
+
+  Widget _buildBookSpineView(
+      List<BookModel> books,
+      ) {
+    final screenWidth =
+        MediaQuery.of(context).size.width;
+
+    final bottomSafeArea =
+        MediaQuery.of(context)
+            .padding
+            .bottom;
+
+    final shelves =
+    _buildLibrarySpineShelves(
+      books: books,
+      screenWidth: screenWidth,
+    );
+
+    if (books.isEmpty) {
+      return Center(
+        child: Text(
+          '아직 등록된 책이 없어요.',
+          style: TextStyle(
+            color: Colors.white60,
+            fontFamily: 'kopub',
+            fontSize:
+            screenWidth * 0.035,
+          ),
+        ),
+      );
+    }
+
+    return Stack(
+      children: [
+        ListView.builder(
+          padding: EdgeInsets.fromLTRB(
+            screenWidth * 0.055,
+            screenWidth * 0.04,
+            screenWidth * 0.055,
+            bottomSafeArea + 130,
+          ),
+          itemCount: shelves.length,
+          itemBuilder: (
+              context,
+              index,
+              ) {
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom:
+                screenWidth * 0.04,
+              ),
+              child:
+              _buildLibrarySpineShelf(
+                books: shelves[index],
+                screenWidth:
+                screenWidth,
+              ),
+            );
+          },
+        ),
+
+        if (_isLoadingLibrarySpines)
+          Positioned(
+            top: screenWidth * 0.025,
+            right: screenWidth * 0.055,
+            child: SizedBox(
+              width: 18,
+              height: 18,
+              child:
+              CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Colors.white
+                    .withOpacity(0.8),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  List<List<BookModel>>
+  _buildLibrarySpineShelves({
+    required List<BookModel> books,
+    required double screenWidth,
+  }) {
+    final availableWidth =
+        screenWidth * 0.89;
+
+    final gap =
+        screenWidth * 0.007;
+
+    final shelves =
+    <List<BookModel>>[];
+
+    var currentShelf =
+    <BookModel>[];
+
+    double usedWidth = 0;
+
+    for (final book in books) {
+      final bookWidth =
+      _librarySpineWidth(
+        book,
+        screenWidth,
+      );
+
+      final requiredWidth =
+      currentShelf.isEmpty
+          ? bookWidth
+          : gap + bookWidth;
+
+      if (currentShelf.isNotEmpty &&
+          usedWidth + requiredWidth >
+              availableWidth) {
+        shelves.add(
+          currentShelf,
+        );
+
+        currentShelf =
+        <BookModel>[];
+
+        usedWidth = 0;
+      }
+
+      if (currentShelf.isNotEmpty) {
+        usedWidth += gap;
+      }
+
+      currentShelf.add(
+        book,
+      );
+
+      usedWidth += bookWidth;
+    }
+
+    if (currentShelf.isNotEmpty) {
+      shelves.add(
+        currentShelf,
+      );
+    }
+
+    return shelves;
+  }
+
+  double _librarySpineWidth(
+      BookModel book,
+      double screenWidth,
+      ) {
+    final baseWidth =
+        screenWidth * 0.050;
+
+    final widthFactor =
+        0.88 +
+            ((book.title.hashCode.abs() %
+                25) /
+                100);
+
+    return baseWidth *
+        widthFactor;
+  }
+
+  Widget _buildLibrarySpineShelf({
+    required List<BookModel> books,
+    required double screenWidth,
+  }) {
+    final shelfWidth =
+        screenWidth * 0.89;
+
+    final bookHeight =
+        screenWidth * 0.50;
+
+    final baseGap =
+        screenWidth * 0.006;
+
+    final maxGap =
+        screenWidth * 0.018;
+
+    // =================================================
+    // Glass / Acrylic shelf dimensions
+    // =================================================
+
+    final shelfThickness =
+        screenWidth * 0.014;
+
+    final shelfGlowHeight =
+        screenWidth * 0.008;
+
+    final totalBookWidth =
+    books.fold<double>(
+      0,
+          (sum, book) =>
+      sum +
+          _librarySpineWidth(
+            book,
+            screenWidth,
+          ),
+    );
+
+    final remainingWidth =
+    math.max(
+      0,
+      shelfWidth -
+          totalBookWidth,
+    );
+
+    double gap = baseGap;
+
+    if (books.length > 1) {
+      final distributedGap =
+          remainingWidth /
+              (books.length - 1);
+
+      gap = math.min(
+        maxGap,
+        math.max(
+          baseGap,
+          distributedGap,
+        ),
+      );
+    }
+
+    double currentX = 0;
+
+    final positionedBooks =
+    <Widget>[];
+
+    for (final book in books) {
+      final width =
+      _librarySpineWidth(
+        book,
+        screenWidth,
+      );
+
+      final x = currentX;
+
+      positionedBooks.add(
+        Positioned(
+          left: x,
+
+          // 책이 유리 선반 위에 놓이는 위치
+          bottom:
+          shelfThickness +
+              shelfGlowHeight,
+
+          child: GestureDetector(
+            onTap: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) =>
+                      BookDetailScreen(
+                        book: book,
+                      ),
+                ),
+              );
+
+              if (mounted) {
+                setState(() {});
+              }
+            },
+            child: BookSpineWidget(
+              title: book.title,
+              author: book.author,
+              spineUrl:
+              book.spineUrl,
+              coverUrl:
+              book.imageUrl,
+              width: width,
+              height:
+              bookHeight,
+            ),
+          ),
+        ),
+      );
+
+      currentX +=
+          width + gap;
+    }
+
+    return SizedBox(
+      width: shelfWidth,
+      height:
+      bookHeight +
+          shelfThickness +
+          shelfGlowHeight +
+          screenWidth * 0.018,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          // =================================================
+          // Books
+          // =================================================
+
+          ...positionedBooks,
+
+          // =================================================
+          // 아주 약한 하단 glow
+          // 유리 선반 아래에서 퍼지는 느낌
+          // =================================================
+
+          Positioned(
+            left:
+            screenWidth * 0.015,
+            right:
+            screenWidth * 0.015,
+            bottom: 0,
+            child: Container(
+              height:
+              shelfGlowHeight,
+              decoration: BoxDecoration(
+                borderRadius:
+                BorderRadius.circular(
+                  999,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.white
+                        .withOpacity(0.08),
+                    blurRadius: 12,
+                    spreadRadius: 1,
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // =================================================
+          // Acrylic / Frosted glass shelf
+          // =================================================
+
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom:
+            shelfGlowHeight,
+            child: ClipRRect(
+              borderRadius:
+              BorderRadius.circular(
+                999,
+              ),
+              child: Container(
+                height:
+                shelfThickness,
+                decoration: BoxDecoration(
+                  // 투명 아크릴 느낌
+                  color: Colors.white
+                      .withOpacity(0.11),
+
+                  borderRadius:
+                  BorderRadius.circular(
+                    999,
+                  ),
+
+                  // 얇은 white edge
+                  border: Border.all(
+                    color: Colors.white
+                        .withOpacity(0.22),
+                    width: 0.7,
+                  ),
+
+                  // 아주 미세한 투명 그라데이션
+                  gradient:
+                  LinearGradient(
+                    begin:
+                    Alignment.topCenter,
+                    end:
+                    Alignment.bottomCenter,
+                    colors: [
+                      Colors.white
+                          .withOpacity(
+                        0.18,
+                      ),
+                      Colors.white
+                          .withOpacity(
+                        0.07,
+                      ),
+                    ],
+                  ),
+
+                  boxShadow: [
+                    // 아래쪽 깊이감
+                    BoxShadow(
+                      color: Colors.black
+                          .withOpacity(
+                        0.10,
+                      ),
+                      blurRadius: 10,
+                      offset:
+                      const Offset(
+                        0,
+                        4,
+                      ),
+                    ),
+
+                    // 은은한 white glow
+                    BoxShadow(
+                      color: Colors.white
+                          .withOpacity(
+                        0.05,
+                      ),
+                      blurRadius: 6,
+                      offset:
+                      const Offset(
+                        0,
+                        -1,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // =================================================
+          // 유리 상단 엣지
+          // 빛이 살짝 맺힌 느낌
+          // =================================================
+
+          Positioned(
+            left:
+            screenWidth * 0.012,
+            right:
+            screenWidth * 0.012,
+            bottom:
+            shelfGlowHeight +
+                shelfThickness -
+                1,
+            child: Container(
+              height: 1,
+              decoration:
+              BoxDecoration(
+                borderRadius:
+                BorderRadius.circular(
+                  999,
+                ),
+                gradient:
+                LinearGradient(
+                  colors: [
+                    Colors.white
+                        .withOpacity(0.02),
+                    Colors.white
+                        .withOpacity(0.32),
+                    Colors.white
+                        .withOpacity(0.02),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _loadLibrarySpines(
+      List<BookModel> books,
+      ) async {
+    if (_isLoadingLibrarySpines) {
+      return;
+    }
+
+    setState(() {
+      _isLoadingLibrarySpines = true;
+    });
+
+    try {
+      const batchSize = 5;
+
+      for (int i = 0; i < books.length; i += batchSize) {
+        final end = math.min(
+          i + batchSize,
+          books.length,
+        );
+
+        final batch = books.sublist(
+          i,
+          end,
+        );
+
+        await Future.wait(
+          batch.map((book) async {
+
+
+            // 이미 조회 완료된 책
+            if (book.spineChecked) {
+              return;
+            }
+
+            // ISBN 없는 책은 조회 불가
+            if (book.isbn == null ||
+                book.isbn!.trim().isEmpty) {
+              debugPrint(
+                '[LIBRARY SPINE SKIP] '
+                    'ISBN 없음: ${book.title}',
+              );
+
+              return;
+            }
+
+            try {
+              final result =
+              await Yes24BookService.findByIsbn(
+                book.isbn!,
+              );
+
+              if (!mounted) return;
+
+              final savedBooksProvider =
+              context.read<
+                  SavedBooksProvider>();
+
+              if (!result.found) {
+                await savedBooksProvider
+                    .updateBookSpineCache(
+                  bookId: book.id,
+                  yes24ItemId: null,
+                  spineUrl: null,
+                );
+
+                return;
+              }
+
+              await savedBooksProvider
+                  .updateBookSpineCache(
+                bookId: book.id,
+                yes24ItemId:
+                result.itemId,
+                spineUrl:
+                result.spineUrl,
+              );
+
+              debugPrint(
+                '[LIBRARY SPINE SAVED] '
+                    '${book.title} / '
+                    '${result.spineUrl}',
+              );
+            } catch (e) {
+              debugPrint(
+                '[LIBRARY SPINE ERROR] '
+                    '${book.title} / $e',
+              );
+            }
+          }),
+        );
+
+        if (!mounted) {
+          return;
+        }
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingLibrarySpines =
+          false;
+        });
+      }
+    }
   }
 
   // 서재 클릭 시 생성 완료 후에만 이동 가능
   void _onLibraryTap(String libraryName) {
     final provider = Provider.of<CustomLibraryProvider>(context, listen: false);
 
-    if (!provider.isLibraryBeingCreated) {
-      final pageIndex = 5 + provider.orderedLibraryNames.indexOf(libraryName);
+    if (provider.isLibraryBeingCreated) return;
 
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _pageController.animateToPage(
-          pageIndex,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeInOut,
-        );
+    final pageIndex = 5 + provider.orderedLibraryNames.indexOf(libraryName);
+    if (pageIndex < 5) return;
 
-        setState(() {
-          _currentPage = pageIndex;
-        });
-      });
-    }
+    setState(() {
+      _currentPage = pageIndex;
+    });
+
+    _pageController.jumpToPage(pageIndex);
   }
 
   /// 책 배열
   Widget _buildBookGrid(List<BookModel> books) {
     final screenWidth = MediaQuery.of(context).size.width;
+    final bottomSafeArea = MediaQuery.of(context).padding.bottom;
 
     int crossAxisCount = 3;
     if (screenWidth > 1000) {
@@ -776,8 +2152,6 @@ class LibraryScreenState extends State<LibraryScreen> {
     }
 
     final spacing = screenWidth * 0.025;
-
-    // ⬇️ 카드 세로 살짝 늘림 (0.50 → 0.47)
     final tileAspectRatio = screenWidth < 380 ? 0.46 : 0.47;
 
     return Padding(
@@ -786,14 +2160,18 @@ class LibraryScreenState extends State<LibraryScreen> {
         vertical: screenWidth * 0.015,
       ),
       child: GridView.builder(
-        shrinkWrap: true,
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: EdgeInsets.symmetric(horizontal: spacing * 0.6),
+        padding: EdgeInsets.fromLTRB(
+          spacing * 0.6,
+          0,
+          spacing * 0.6,
+          bottomSafeArea + 130,
+        ),
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: crossAxisCount,
           crossAxisSpacing: spacing,
           mainAxisSpacing: spacing,
-          childAspectRatio: tileAspectRatio, // ✅ 여기만 바꿔도 대부분 해결
+          childAspectRatio: tileAspectRatio,
         ),
         itemCount: books.length,
         itemBuilder: (context, index) => _buildBookItem(books[index]),
@@ -956,70 +2334,143 @@ class LibraryScreenState extends State<LibraryScreen> {
 
   /// 커스텀 서재 설정창
   void _openLibrarySettings(String libraryName) {
+    final screenWidth =
+        MediaQuery.of(context).size.width;
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      backgroundColor: const Color(0xFF1B2C2E),
-      builder: (context) {
-        final height = MediaQuery.of(context).size.height;
-        final viewInsets = MediaQuery.of(context).viewInsets;
+      backgroundColor:
+      const Color(0xFF1B2C2E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(20),
+        ),
+      ),
+      builder: (sheetContext) {
+        final viewInsets =
+            MediaQuery.of(sheetContext).viewInsets;
 
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: viewInsets.bottom,
-            left: 16,
-            right: 16,
-            top: 24,
-          ),
-          child: ConstrainedBox(
-            constraints: BoxConstraints(maxHeight: height * 0.6),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _buildTransparentListTile(
-                    icon: Icons.edit,
-                    iconColor: Colors.amberAccent,
-                    text: "서재 이름 변경",
-                    onTap: () {
-                      Navigator.pop(context);
-                      _showRenameLibraryDialog(libraryName);
-                    },
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: EdgeInsets.only(
+              left: screenWidth * 0.04,
+              right: screenWidth * 0.04,
+              top: screenWidth * 0.025,
+              bottom:
+              viewInsets.bottom +
+                  screenWidth * 0.04,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment:
+              CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: screenWidth * 0.11,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.white24,
+                      borderRadius:
+                      BorderRadius.circular(10),
+                    ),
                   ),
-                  const SizedBox(height: 8),
-                  _buildTransparentListTile(
-                    icon: Icons.add_circle_outline,
-                    iconColor: Colors.amberAccent,
-                    text: "서재에 책 추가",
-                    onTap: () {
-                      Navigator.pop(context);
-                      _showAddBooksToLibraryDialog(libraryName);
-                    },
+                ),
+
+                SizedBox(
+                  height: screenWidth * 0.045,
+                ),
+
+                Text(
+                  '서재 설정',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontFamily: 'kopub',
+                    fontSize: screenWidth * 0.045,
+                    fontWeight: FontWeight.bold,
                   ),
-                  const SizedBox(height: 8),
-                  _buildTransparentListTile(
-                    icon: Icons.remove_circle_outline,
-                    iconColor: Colors.white70,
-                    text: "서재에서 책 제거",
-                    onTap: () {
-                      Navigator.pop(context);
-                      _showRemoveBooksFromLibraryDialog(libraryName);
-                    },
+                ),
+
+                SizedBox(
+                  height: screenWidth * 0.012,
+                ),
+
+                Text(
+                  '「$libraryName」 서재를 관리해요.',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white60,
+                    fontFamily: 'kopub',
+                    fontSize: screenWidth * 0.032,
+                    height: 1.4,
                   ),
-                  const SizedBox(height: 8),
-                  _buildTransparentListTile(
-                    icon: Icons.delete_forever,
-                    iconColor: Colors.redAccent,
-                    text: "서재 삭제",
-                    onTap: () {
-                      Navigator.pop(context);
-                      _confirmDeleteLibrary(libraryName);
-                    },
-                  ),
-                  const SizedBox(height: 20),
-                ],
-              ),
+                ),
+
+                SizedBox(
+                  height: screenWidth * 0.045,
+                ),
+
+                _buildLibrarySettingOption(
+                  icon: Icons.edit_rounded,
+                  title: '서재 이름 변경',
+                  description:
+                  '서재 이름을 새롭게 변경해요.',
+                  iconColor: Colors.amberAccent,
+                  screenWidth: screenWidth,
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+
+                    _showRenameLibraryDialog(
+                      libraryName,
+                    );
+                  },
+                ),
+
+                SizedBox(
+                  height: screenWidth * 0.025,
+                ),
+
+                _buildLibrarySettingOption(
+                  icon:
+                  Icons.remove_circle_outline_rounded,
+                  title: '서재에서 책 제거',
+                  description:
+                  '이 서재에 담긴 책을 선택해 제거해요.',
+                  iconColor: Colors.white70,
+                  screenWidth: screenWidth,
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+
+                    _showRemoveBooksFromLibraryDialog(
+                      libraryName,
+                    );
+                  },
+                ),
+
+                SizedBox(
+                  height: screenWidth * 0.025,
+                ),
+
+                _buildLibrarySettingOption(
+                  icon: Icons.delete_outline_rounded,
+                  title: '서재 삭제',
+                  description:
+                  '서재를 삭제해요. 등록한 책은 유지돼요.',
+                  iconColor: Colors.redAccent,
+                  screenWidth: screenWidth,
+                  isDestructive: true,
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+
+                    _confirmDeleteLibrary(
+                      libraryName,
+                    );
+                  },
+                ),
+              ],
             ),
           ),
         );
@@ -1027,28 +2478,97 @@ class LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
-  Widget _buildTransparentListTile({
+  Widget _buildLibrarySettingOption({
     required IconData icon,
+    required String title,
+    required String description,
     required Color iconColor,
-    required String text,
+    required double screenWidth,
     required VoidCallback onTap,
+    bool isDestructive = false,
   }) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white12,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: ListTile(
-        leading: Icon(icon, color: iconColor),
-        title: Text(
-          text,
-          style: const TextStyle(
-            color: Colors.white,
-            fontFamily: 'kopub',
-            fontWeight: FontWeight.bold,
+    return Material(
+      color: isDestructive
+          ? Colors.redAccent.withOpacity(0.08)
+          : Colors.white.withOpacity(0.07),
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Padding(
+          padding: EdgeInsets.all(
+            screenWidth * 0.035,
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: screenWidth * 0.12,
+                height: screenWidth * 0.12,
+                decoration: BoxDecoration(
+                  color: iconColor.withOpacity(0.12),
+                  borderRadius:
+                  BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  icon,
+                  color: iconColor,
+                  size: screenWidth * 0.06,
+                ),
+              ),
+
+              SizedBox(
+                width: screenWidth * 0.03,
+              ),
+
+              Expanded(
+                child: Column(
+                  crossAxisAlignment:
+                  CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        color: isDestructive
+                            ? Colors.redAccent
+                            : Colors.white,
+                        fontFamily: 'kopub',
+                        fontSize:
+                        screenWidth * 0.036,
+                        fontWeight:
+                        FontWeight.bold,
+                      ),
+                    ),
+
+                    SizedBox(
+                      height:
+                      screenWidth * 0.01,
+                    ),
+
+                    Text(
+                      description,
+                      style: TextStyle(
+                        color: Colors.white60,
+                        fontFamily: 'kopub',
+                        fontSize:
+                        screenWidth * 0.029,
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              Icon(
+                Icons.chevron_right_rounded,
+                color: isDestructive
+                    ? Colors.redAccent
+                    .withOpacity(0.7)
+                    : Colors.white38,
+                size: screenWidth * 0.055,
+              ),
+            ],
           ),
         ),
-        onTap: onTap,
       ),
     );
   }
@@ -1521,3 +3041,4 @@ class LibraryScreenState extends State<LibraryScreen> {
   }
 
 }
+

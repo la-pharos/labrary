@@ -5,9 +5,14 @@ class ChallengeAttempt {
   final String attemptId;
   final DateTime startDate;
   final DateTime? endDate;
+
+  // 실제로 성공 또는 완료 처리된 시각
+  final DateTime? completedAt;
+
   final List<String> completedBookIds;
   final bool isSuccessful;
   final bool completed;
+
   bool get isCompleted => completed;
 
   final List<BookModel>? participatedBooks;
@@ -20,6 +25,7 @@ class ChallengeAttempt {
     String? attemptId,
     required this.startDate,
     this.endDate,
+    this.completedAt,
     this.completedBookIds = const [],
     this.isSuccessful = false,
     this.completed = false,
@@ -35,19 +41,31 @@ class ChallengeAttempt {
     return ChallengeAttempt(
       attemptId: map['attemptId'] ?? const Uuid().v4(),
       startDate: DateTime.parse(map['startDate']).toLocal(),
-      endDate: map['endDate'] != null ? DateTime.tryParse(map['endDate'])?.toLocal() : null,
-      completedBookIds: List<String>.from(map['completedBookIds'] ?? []),
+      endDate: map['endDate'] != null
+          ? DateTime.tryParse(map['endDate'])?.toLocal()
+          : null,
+      completedAt: map['completedAt'] != null
+          ? DateTime.tryParse(map['completedAt'])?.toLocal()
+          : null,
+      completedBookIds: List<String>.from(
+        map['completedBookIds'] ?? [],
+      ),
       isSuccessful: map['isSuccessful'] ?? false,
-      completed: map['completed'] ?? false, // ✅ 수정: 기본값 false
+      completed: map['completed'] ?? false,
       participatedBooks: map['participatedBooks'] != null
           ? List<BookModel>.from(
-          (map['participatedBooks'] as List).map((e) => BookModel.fromMap(e)))
+        (map['participatedBooks'] as List).map(
+              (e) => BookModel.fromMap(
+            Map<String, dynamic>.from(e),
+          ),
+        ),
+      )
           : null,
       stageIndex: map['stageIndex'],
       selectedDuration: map['selectedDuration'],
       recordData: map['recordData'] is Map
           ? Map<String, dynamic>.from(map['recordData'])
-          : null, // ✅ 타입 안전성 강화
+          : null,
     );
   }
 
@@ -55,10 +73,13 @@ class ChallengeAttempt {
     'attemptId': attemptId,
     'startDate': startDate.toIso8601String(),
     'endDate': endDate?.toIso8601String(),
+    'completedAt': completedAt?.toIso8601String(),
     'completedBookIds': completedBookIds,
     'isSuccessful': isSuccessful,
     'completed': completed,
-    'participatedBooks': participatedBooks?.map((b) => b.toMap()).toList(),
+    'participatedBooks': participatedBooks
+        ?.map((b) => b.toMap())
+        .toList(),
     'stageIndex': stageIndex,
     'selectedDuration': selectedDuration,
     'recordData': recordData,
@@ -68,6 +89,7 @@ class ChallengeAttempt {
     String? attemptId,
     DateTime? startDate,
     DateTime? endDate,
+    DateTime? completedAt,
     List<String>? completedBookIds,
     bool? isSuccessful,
     bool? completed,
@@ -80,6 +102,7 @@ class ChallengeAttempt {
       attemptId: attemptId ?? this.attemptId,
       startDate: startDate ?? this.startDate,
       endDate: endDate ?? this.endDate,
+      completedAt: completedAt ?? this.completedAt,
       completedBookIds: completedBookIds ?? this.completedBookIds,
       isSuccessful: isSuccessful ?? this.isSuccessful,
       completed: completed ?? this.completed,

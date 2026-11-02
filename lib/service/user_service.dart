@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../model/user_profile.dart';
+import '../utils/sanitize_utils.dart';
+
 import 'package:dayverse_book/service/reading_log_service.dart';
 
 class UserService {
@@ -24,7 +26,10 @@ class UserService {
       profileImageUrl: defaultProfileImageUrl, // ✅ 기본 이미지 등록
     );
 
-    await _firestore.collection('users').doc(firebaseUser.uid).set(userProfile.toMap());
+    await _firestore
+        .collection('users')
+        .doc(firebaseUser.uid)
+        .set(sanitizeMap(userProfile.toMap()));
   }
 
   /// Firestore에서 불러오기
@@ -39,6 +44,16 @@ class UserService {
 
   /// 사용자 정보 업데이트
   Future<void> updateUserProfile(String uid, Map<String, dynamic> updates) async {
-    await _firestore.collection('users').doc(uid).update(updates);
+    final safeUpdates = sanitizeMap(updates);
+
+    if (safeUpdates.isEmpty) {
+      // 🔒 iOS 크래시 방지: 빈 update 금지
+      return;
+    }
+
+    await _firestore
+        .collection('users')
+        .doc(uid)
+        .update(safeUpdates);
   }
 }

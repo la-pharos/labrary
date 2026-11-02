@@ -1,18 +1,22 @@
 import 'package:flutter/material.dart';
+
 import 'package:dayverse_book/model/challenge_model.dart';
 import 'package:dayverse_book/model/book_model.dart';
+import 'package:dayverse_book/widget/card_box.dart';
 
-/// 단일+운영자 지정도서+페이지 연동 챌린지의 참여/완료 화면 공용 위젯
+/// 지정 도서 + 페이지 연동 챌린지의
+/// 진행/완료 화면 공용 위젯
 class ReadingBookSection extends StatelessWidget {
   final Challenge challenge;
   final List<BookModel> savedBooks;
+
   final bool isDoneMode;
   final List<String>? completedBookIds;
 
-  /// ✅ 풀/참여 도서 등 외부에서 주입하는 타겟 리스트 (최우선)
+  /// 풀/참여 도서 등 외부에서 주입하는 타겟 리스트
   final List<BookModel>? booksOverride;
 
-  /// ✅ 부모에서 풀/네트워크 로딩 여부를 넘기면, 제목은 즉시 노출 + 목록 대신 로딩 인디케이터 표시
+  /// 부모에서 풀/네트워크 로딩 여부 전달
   final bool isLoading;
 
   const ReadingBookSection({
@@ -25,260 +29,793 @@ class ReadingBookSection extends StatelessWidget {
     this.isLoading = false,
   });
 
-  // ── 유틸: 키(id > isbn) ──────────────────────────────────────────────
-  String? _keyForBook(BookModel b) {
-    if (b.id.isNotEmpty) return b.id;
-    final isbn = b.isbn;
-    if (isbn != null && isbn.isNotEmpty) return isbn;
+  // =========================================================
+  // BOOK KEY
+  // =========================================================
+
+  String? _keyForBook(BookModel book) {
+    if (book.id.isNotEmpty) {
+      return book.id;
+    }
+
+    final isbn = book.isbn;
+
+    if (isbn != null &&
+        isbn.isNotEmpty) {
+      return isbn;
+    }
+
     return null;
   }
 
-  // ── 유틸: savedBooks로 이미지/페이지 등 보강 ────────────────────────────
-  List<BookModel> _enrichWithSaved(List<BookModel> books, List<BookModel> saved) {
-    final savedMap = <String, BookModel>{
-      for (final s in saved)
-        if (_keyForBook(s) != null) _keyForBook(s)!: s
+  // =========================================================
+  // ENRICH
+  // =========================================================
+
+  List<BookModel> _enrichWithSaved(
+      List<BookModel> books,
+      List<BookModel> saved,
+      ) {
+    final savedMap =
+    <String, BookModel>{
+      for (final book in saved)
+        if (_keyForBook(book) != null)
+          _keyForBook(book)!: book,
     };
 
-    return books.map((b) {
-      final k = _keyForBook(b);
-      final sb = (k != null) ? savedMap[k] : null;
-      if (sb == null) return b;
-      return b.copyWith(
-        // 비어있을 때만 보강
-        imageUrl: (b.imageUrl?.isNotEmpty == true) ? b.imageUrl : sb.imageUrl,
-        pageCount: (b.pageCount != null && b.pageCount! > 0) ? b.pageCount : sb.pageCount,
-        publisher: (b.publisher?.isNotEmpty == true) ? b.publisher : sb.publisher,
-        itemId: b.itemId ?? sb.itemId,
-        description: b.description ?? sb.description,
+    return books.map((book) {
+      final key =
+      _keyForBook(book);
+
+      final savedBook =
+      key != null
+          ? savedMap[key]
+          : null;
+
+      if (savedBook == null) {
+        return book;
+      }
+
+      return book.copyWith(
+        imageUrl:
+        book.imageUrl?.isNotEmpty ==
+            true
+            ? book.imageUrl
+            : savedBook.imageUrl,
+
+        pageCount:
+        book.pageCount > 0
+            ? book.pageCount
+            : savedBook.pageCount,
+
+        publisher:
+        book.publisher?.isNotEmpty ==
+            true
+            ? book.publisher
+            : savedBook.publisher,
+
+        itemId:
+        book.itemId ??
+            savedBook.itemId,
+
+        description:
+        book.description ??
+            savedBook.description,
       );
     }).toList();
   }
 
-  // ── 유틸: 커버 안전 렌더링 ────────────────────────────────────────────
-  Widget _cover(String? url, double w, double h) {
-    if (url == null || url.isEmpty) return _fallbackBox(w, h);
-    if (url.startsWith('http')) {
-      return Image.network(
-        url, width: w, height: h, fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => _fallbackBox(w, h),
+  // =========================================================
+  // COVER
+  // =========================================================
+
+  Widget _buildCover(
+      String? url,
+      double width,
+      double height,
+      ) {
+    if (url == null ||
+        url.isEmpty) {
+      return _buildCoverFallback(
+        width,
+        height,
       );
     }
-    if (url.startsWith('assets/')) {
-      return Image.asset(url, width: w, height: h, fit: BoxFit.cover);
+
+    if (url.startsWith('http')) {
+      return Image.network(
+        url,
+        width: width,
+        height: height,
+        fit: BoxFit.cover,
+        errorBuilder: (
+            _,
+            __,
+            ___,
+            ) {
+          return _buildCoverFallback(
+            width,
+            height,
+          );
+        },
+      );
     }
-    return _fallbackBox(w, h);
+
+    if (url.startsWith('assets/')) {
+      return Image.asset(
+        url,
+        width: width,
+        height: height,
+        fit: BoxFit.cover,
+        errorBuilder: (
+            _,
+            __,
+            ___,
+            ) {
+          return _buildCoverFallback(
+            width,
+            height,
+          );
+        },
+      );
+    }
+
+    return _buildCoverFallback(
+      width,
+      height,
+    );
   }
 
-  Widget _fallbackBox(double w, double h) => Container(
-    width: w, height: h, color: Colors.grey,
-    child: const Icon(Icons.book, color: Colors.white54),
-  );
+  Widget _buildCoverFallback(
+      double width,
+      double height,
+      ) {
+    return Container(
+      width: width,
+      height: height,
+      color: Colors.white
+          .withOpacity(0.055),
+      alignment:
+      Alignment.center,
+      child: const Icon(
+        Icons.book_rounded,
+        color:
+        Colors.white38,
+      ),
+    );
+  }
+
+  // =========================================================
+  // BUILD
+  // =========================================================
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final titleFontSize = screenWidth * 0.035; // ≈16
-    final bookTitleFontSize = screenWidth * 0.032; // ≈15
-    final infoFontSize = screenWidth * 0.03; // ≈12
-    final coverWidth = screenWidth * 0.14; // ≈60
-    final coverHeight = coverWidth * 1.4; // ≈85
-    final containerPadding = screenWidth * 0.03; // ≈12
-    final spacing = screenWidth * 0.03; // ≈12
+    final screenWidth =
+        MediaQuery.of(context).size.width;
 
-    const completeThreshold = 1.0;
+    final spacing =
+        screenWidth * 0.025;
 
-    final isSystemDefined = challenge.specificBookMode == SpecificBookMode.systemDefined;
-    final isUserDefined   = challenge.specificBookMode == SpecificBookMode.userDefined;
+    final isSystemDefined =
+        challenge.specificBookMode ==
+            SpecificBookMode.systemDefined;
 
-    // ✅ recordPages 안전 추출 (record/recordData/bookReadPages 어디에 있어도 OK)
-    final Map<String, dynamic> recordPages = () {
-      final rec = (challenge.attempts.isNotEmpty)
-          ? (challenge.attempts.last.recordData as Map?)?.cast<String, dynamic>()
+    final isUserDefined =
+        challenge.specificBookMode ==
+            SpecificBookMode.userDefined;
+
+    // =======================================================
+    // RECORD PAGE DATA
+    // =======================================================
+
+    final Map<String, dynamic>
+    recordPages = () {
+      final record =
+      challenge.attempts.isNotEmpty
+          ? (challenge
+          .attempts
+          .last
+          .recordData
+      as Map?)
+          ?.cast<
+          String,
+          dynamic>()
           : null;
-      if (rec == null) return const <String, dynamic>{};
-      if (rec['bookReadPages'] is Map) {
-        return Map<String, dynamic>.from(rec['bookReadPages'] as Map);
+
+      if (record == null) {
+        return const <
+            String,
+            dynamic>{};
       }
-      if (rec['recordData'] is Map && (rec['recordData'] as Map)['bookReadPages'] is Map) {
-        return Map<String, dynamic>.from((rec['recordData'] as Map)['bookReadPages'] as Map);
+
+      if (record['bookReadPages']
+      is Map) {
+        return Map<
+            String,
+            dynamic>.from(
+          record['bookReadPages']
+          as Map,
+        );
       }
-      return const <String, dynamic>{};
+
+      if (record['recordData']
+      is Map &&
+          (record['recordData']
+          as Map)[
+          'bookReadPages'] is Map) {
+        return Map<
+            String,
+            dynamic>.from(
+          (record['recordData']
+          as Map)[
+          'bookReadPages'] as Map,
+        );
+      }
+
+      return const <
+          String,
+          dynamic>{};
     }();
 
-    // ✅ 최우선: 외부에서 주입한 타겟(풀/참여/필수 변환 결과)
+    // =======================================================
+    // TARGET BOOKS
+    // =======================================================
+
     List<BookModel> books;
-    if (booksOverride != null && booksOverride!.isNotEmpty) {
-      books = booksOverride!;
-    } else if (isSystemDefined && (challenge.requiredBooks?.isNotEmpty ?? false)) {
-      // 운영자 지정: 먼저 requiredBooks를 가져오고, savedBooks로 보강
-      books = challenge.requiredBooks!;
+
+    if (booksOverride != null &&
+        booksOverride!.isNotEmpty) {
+      books =
+      booksOverride!;
+    } else if (isSystemDefined &&
+        challenge.requiredBooks
+            ?.isNotEmpty ==
+            true) {
+      books =
+      challenge.requiredBooks!;
     } else if (isUserDefined &&
         challenge.attempts.isNotEmpty &&
-        (challenge.attempts.last.participatedBooks?.isNotEmpty ?? false)) {
-      books = challenge.attempts.last.participatedBooks!;
+        challenge
+            .attempts
+            .last
+            .participatedBooks
+            ?.isNotEmpty ==
+            true) {
+      books = challenge
+          .attempts
+          .last
+          .participatedBooks!;
     } else {
-      books = const <BookModel>[];
+      books =
+      const <BookModel>[];
     }
 
-    // ✅ savedBooks로 이미지/페이지 보강 (모든 시나리오 공통)
-    books = _enrichWithSaved(books, savedBooks);
-
-    // ── 타이틀은 즉시 표기 ──────────────────────────────────────────────
-    final title = Text(
-      "🔸 읽어야 할 책",
-      style: TextStyle(
-        color: Colors.white,
-        fontSize: titleFontSize,
-        fontFamily: 'Kopub',
-      ),
+    books = _enrichWithSaved(
+      books,
+      savedBooks,
     );
 
-    // ── 로딩 인디케이터 (책 목록 대신) ─────────────────────────────────
+    // =======================================================
+    // LOADING
+    // =======================================================
+
     if (isLoading) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          title,
-          SizedBox(height: spacing),
-          Center(
-            child: Padding(
-              padding: EdgeInsets.symmetric(vertical: spacing * 1.5),
-              child: const SizedBox(
-                width: 28, height: 28,
-                child: CircularProgressIndicator(strokeWidth: 3, color: Colors.amberAccent),
-              ),
+      return Padding(
+        padding: EdgeInsets.symmetric(
+          vertical:
+          screenWidth * 0.045,
+        ),
+        child: const Center(
+          child: SizedBox(
+            width: 26,
+            height: 26,
+            child:
+            CircularProgressIndicator(
+              strokeWidth: 2.5,
+              color:
+              Colors.amberAccent,
             ),
           ),
-        ],
+        ),
       );
     }
 
-    // ✅ 풀 기반에서 아직 목록이 비어있을 수 있음 (부모가 setState로 다시 빌드해줄 것)
+    // =======================================================
+    // EMPTY
+    // =======================================================
+
     if (books.isEmpty) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          title,
-          SizedBox(height: spacing),
-          Text(
-            "목록을 불러오는 중이거나, 표시할 도서가 없어요.",
-            style: TextStyle(color: Colors.white70, fontSize: infoFontSize),
-          ),
-        ],
+      return CardBox(
+        margin: EdgeInsets.zero,
+        padding: EdgeInsets.all(
+          screenWidth * 0.04,
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons
+                  .menu_book_outlined,
+              color:
+              Colors.white38,
+              size:
+              screenWidth * 0.045,
+            ),
+
+            SizedBox(
+              width:
+              screenWidth * 0.025,
+            ),
+
+            Expanded(
+              child: Text(
+                '표시할 도서가 없어요.',
+                style: TextStyle(
+                  color:
+                  Colors.white54,
+                  fontFamily:
+                  'kopub',
+                  fontSize:
+                  screenWidth *
+                      0.029,
+                ),
+              ),
+            ),
+          ],
+        ),
       );
     }
 
-    // ── 정상 목록 렌더 ─────────────────────────────────────────────────
+    // =======================================================
+    // BOOK LIST
+    // =======================================================
+
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        title,
-        SizedBox(height: spacing),
-        ...books.map((book) {
-          final pageCount = book.pageCount ?? 0;
+        ...books.map(
+              (book) {
+            final pageCount =
+                book.pageCount;
 
-          // savedBooks 진행도와 record 진행도 중 큰 값 사용
-          final readFromBook = savedBooks.firstWhere(
-                (b) => _keyForBook(b) == _keyForBook(book),
-            orElse: () => book,
-          ).pageRead ?? 0;
+            // savedBooks에서 현재 페이지
+            final savedBook =
+            savedBooks.firstWhere(
+                  (saved) =>
+              _keyForBook(saved) ==
+                  _keyForBook(book),
+              orElse:
+                  () => book,
+            );
 
-          // recordPages는 id 또는 isbn 키일 수 있음 → 둘 다 시도
-          final recKeyId   = book.id;
-          final recKeyIsbn = book.isbn ?? '';
-          final readFromRecord = () {
-            final v1 = recordPages[recKeyId];
-            if (v1 != null) return int.tryParse(v1.toString()) ?? 0;
-            final v2 = (recKeyIsbn.isNotEmpty) ? recordPages[recKeyIsbn] : null;
-            if (v2 != null) return int.tryParse(v2.toString()) ?? 0;
-            return 0;
-          }();
+            final readFromBook =
+                savedBook.pageRead;
 
-          final pageRead = isDoneMode
-              ? (book.pageCount ?? 0)
-              : (readFromBook > readFromRecord ? readFromBook : readFromRecord);
+            // recordPages의 id/isbn 양쪽 검사
+            final recordId =
+                book.id;
 
-          final percentage = pageCount > 0
-              ? (pageRead / pageCount * 100).clamp(0, 100).toInt()
-              : 0;
+            final recordIsbn =
+                book.isbn ?? '';
 
-          final isDone = isDoneMode
-              ? true
-              : (book.isCompleted ?? false) ||
-              (pageCount > 0 && pageRead >= (pageCount * completeThreshold).floor());
+            final readFromRecord = () {
+              final byId =
+              recordPages[
+              recordId];
 
-          final progressBar = pageCount > 0
-              ? Padding(
-            padding: EdgeInsets.only(top: spacing * 0.5),
-            child: LinearProgressIndicator(
-              value: (pageRead / pageCount).clamp(0.0, 1.0),
-              minHeight: 6,
-              backgroundColor: Colors.white24,
-              valueColor: AlwaysStoppedAnimation<Color>(
-                isDone ? Colors.greenAccent : Colors.amberAccent,
+              if (byId != null) {
+                return int.tryParse(
+                  byId.toString(),
+                ) ??
+                    0;
+              }
+
+              final byIsbn =
+              recordIsbn
+                  .isNotEmpty
+                  ? recordPages[
+              recordIsbn]
+                  : null;
+
+              if (byIsbn != null) {
+                return int.tryParse(
+                  byIsbn
+                      .toString(),
+                ) ??
+                    0;
+              }
+
+              return 0;
+            }();
+
+            final pageRead =
+            isDoneMode
+                ? pageCount
+                : readFromBook >
+                readFromRecord
+                ? readFromBook
+                : readFromRecord;
+
+            final percentage =
+            pageCount > 0
+                ? (pageRead /
+                pageCount *
+                100)
+                .clamp(
+              0,
+              100,
+            )
+                .toInt()
+                : 0;
+
+            final isDone =
+                isDoneMode ||
+                    book.isCompleted ==
+                        true ||
+                    (pageCount > 0 &&
+                        pageRead >=
+                            pageCount);
+
+            return Padding(
+              padding:
+              EdgeInsets.only(
+                bottom:
+                spacing,
               ),
-            ),
-          )
-              : const SizedBox.shrink();
+              child:
+              _buildBookCard(
+                book:
+                book,
+                pageRead:
+                pageRead,
+                pageCount:
+                pageCount,
+                percentage:
+                percentage,
+                isDone:
+                isDone,
+                screenWidth:
+                screenWidth,
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
 
-          return Container(
-            margin: EdgeInsets.only(bottom: spacing),
-            padding: EdgeInsets.all(containerPadding),
-            decoration: BoxDecoration(
-              color: isDone ? Colors.green.withOpacity(0.2) : Colors.white10,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(6),
-                  child: _cover(book.imageUrl, coverWidth, coverHeight),
-                ),
-                SizedBox(width: spacing),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        "${book.title} (${book.author ?? '작자 미상'})",
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontFamily: 'kopub',
-                          fontSize: bookTitleFontSize,
-                        ),
-                      ),
-                      SizedBox(height: spacing * 0.5),
-                      Text(
-                        pageCount > 0
-                            ? "$pageRead / $pageCount 페이지 ($percentage%)"
-                            : "페이지 정보 없음",
-                        style: TextStyle(
-                          color: isDone ? Colors.greenAccent : Colors.white60,
-                          fontSize: infoFontSize,
-                        ),
-                      ),
-                      progressBar,
-                    ],
-                  ),
-                ),
-                SizedBox(width: spacing * 0.5),
-                SizedBox(
-                  height: coverHeight,
-                  child: Align(
-                    alignment: Alignment.centerRight,
-                    child: Icon(
-                      isDone ? Icons.check_circle : Icons.radio_button_unchecked,
-                      color: isDone ? Colors.greenAccent : Colors.white38,
-                    ),
+  // =========================================================
+  // BOOK CARD
+  // =========================================================
+
+  Widget _buildBookCard({
+    required BookModel book,
+    required int pageRead,
+    required int pageCount,
+    required int percentage,
+    required bool isDone,
+    required double screenWidth,
+  }) {
+    final coverWidth =
+        screenWidth * 0.14;
+
+    final coverHeight =
+        coverWidth * 1.42;
+
+    return CardBox(
+      margin:
+      EdgeInsets.zero,
+      padding:
+      EdgeInsets.all(
+        screenWidth * 0.03,
+      ),
+      child: Row(
+        crossAxisAlignment:
+        CrossAxisAlignment.start,
+        children: [
+          // ===================================================
+          // COVER
+          // ===================================================
+
+          Container(
+            decoration:
+            BoxDecoration(
+              borderRadius:
+              BorderRadius.circular(
+                7,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black
+                      .withOpacity(0.20),
+                  blurRadius: 7,
+                  offset:
+                  const Offset(
+                    0,
+                    3,
                   ),
                 ),
               ],
             ),
-          );
-        }).toList(),
+            child: ClipRRect(
+              borderRadius:
+              BorderRadius.circular(
+                7,
+              ),
+              child: _buildCover(
+                book.imageUrl,
+                coverWidth,
+                coverHeight,
+              ),
+            ),
+          ),
+
+          SizedBox(
+            width:
+            screenWidth * 0.03,
+          ),
+
+          // ===================================================
+          // BOOK INFO
+          // ===================================================
+
+          Expanded(
+            child: Column(
+              crossAxisAlignment:
+              CrossAxisAlignment.start,
+              children: [
+                Text(
+                  book.title,
+                  maxLines: 2,
+                  overflow:
+                  TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color:
+                    Colors.white,
+                    fontFamily:
+                    'kopub',
+                    fontSize:
+                    screenWidth *
+                        0.032,
+                    fontWeight:
+                    FontWeight.bold,
+                    height:
+                    1.35,
+                  ),
+                ),
+
+                if (book.author
+                    .trim()
+                    .isNotEmpty) ...[
+                  SizedBox(
+                    height:
+                    screenWidth *
+                        0.007,
+                  ),
+
+                  Text(
+                    book.author,
+                    maxLines: 1,
+                    overflow:
+                    TextOverflow
+                        .ellipsis,
+                    style:
+                    TextStyle(
+                      color: Colors
+                          .white54,
+                      fontFamily:
+                      'kopub',
+                      fontSize:
+                      screenWidth *
+                          0.027,
+                    ),
+                  ),
+                ],
+
+                SizedBox(
+                  height:
+                  screenWidth *
+                      0.018,
+                ),
+
+                if (isDoneMode)
+                  _buildDoneResult(
+                    pageCount:
+                    pageCount,
+                    screenWidth:
+                    screenWidth,
+                  )
+                else
+                  _buildOngoingProgress(
+                    pageRead:
+                    pageRead,
+                    pageCount:
+                    pageCount,
+                    percentage:
+                    percentage,
+                    isDone:
+                    isDone,
+                    screenWidth:
+                    screenWidth,
+                  ),
+              ],
+            ),
+          ),
+
+          // ===================================================
+          // COMPLETION BADGE
+          // ===================================================
+
+          if (isDone) ...[
+            SizedBox(
+              width:
+              screenWidth * 0.02,
+            ),
+
+            _buildCompletedBadge(
+              screenWidth,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // =========================================================
+  // ONGOING MODE
+  // =========================================================
+
+  Widget _buildOngoingProgress({
+    required int pageRead,
+    required int pageCount,
+    required int percentage,
+    required bool isDone,
+    required double screenWidth,
+  }) {
+    if (pageCount <= 0) {
+      return Text(
+        '페이지 정보 없음',
+        style: TextStyle(
+          color:
+          Colors.white38,
+          fontFamily:
+          'kopub',
+          fontSize:
+          screenWidth * 0.027,
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment:
+      CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                '$pageRead / '
+                    '$pageCount 페이지',
+                style: TextStyle(
+                  color:
+                  Colors.white60,
+                  fontFamily:
+                  'kopub',
+                  fontSize:
+                  screenWidth *
+                      0.027,
+                ),
+              ),
+            ),
+
+            Text(
+              '$percentage%',
+              style: TextStyle(
+                color:
+                isDone
+                    ? Colors
+                    .amberAccent
+                    : Colors
+                    .white54,
+                fontFamily:
+                'kopub',
+                fontSize:
+                screenWidth *
+                    0.027,
+                fontWeight:
+                FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+
+        SizedBox(
+          height:
+          screenWidth * 0.014,
+        ),
+
+        ClipRRect(
+          borderRadius:
+          BorderRadius.circular(
+            30,
+          ),
+          child:
+          LinearProgressIndicator(
+            value: (pageRead /
+                pageCount)
+                .clamp(
+              0.0,
+              1.0,
+            )
+                .toDouble(),
+            minHeight:
+            screenWidth * 0.015,
+            backgroundColor:
+            Colors.white
+                .withOpacity(
+              0.07,
+            ),
+            color:
+            Colors.amberAccent,
+          ),
+        ),
       ],
+    );
+  }
+
+  // =========================================================
+  // DONE MODE
+  // =========================================================
+
+  Widget _buildDoneResult({
+    required int pageCount,
+    required double screenWidth,
+  }) {
+    return Text(
+      pageCount > 0
+          ? '$pageCount페이지 완독'
+          : '완독 완료',
+      style: TextStyle(
+        color:
+        Colors.amberAccent,
+        fontFamily:
+        'kopub',
+        fontSize:
+        screenWidth * 0.028,
+        fontWeight:
+        FontWeight.w600,
+      ),
+    );
+  }
+
+  // =========================================================
+  // COMPLETED BADGE
+  // =========================================================
+
+  Widget _buildCompletedBadge(
+      double screenWidth,
+      ) {
+    return Container(
+      width:
+      screenWidth * 0.075,
+      height:
+      screenWidth * 0.075,
+      decoration: BoxDecoration(
+        color: Colors.amberAccent
+            .withOpacity(0.12),
+        shape:
+        BoxShape.circle,
+        border: Border.all(
+          color: Colors.amberAccent
+              .withOpacity(0.35),
+        ),
+      ),
+      child: Icon(
+        Icons.check_rounded,
+        color:
+        Colors.amberAccent,
+        size:
+        screenWidth * 0.045,
+      ),
     );
   }
 }

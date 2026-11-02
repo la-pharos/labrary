@@ -4,19 +4,26 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:collection/collection.dart';
 import 'package:dayverse_book/main.dart';
 import 'package:dayverse_book/model/challenge_model.dart';
+import 'package:dayverse_book/model/challenge_attempt_model.dart';
 import 'package:dayverse_book/model/book_model.dart';
 import 'package:dayverse_book/provider/challenge_provider.dart';
 import 'package:dayverse_book/provider/saved_books_provider.dart';
 import 'package:dayverse_book/utils/challenge_progress_utils.dart';
 import 'package:dayverse_book/utils/challenge_check_utils.dart';
 import 'package:dayverse_book/service/challenge_record_service.dart';
-import 'package:dayverse_book/widget/challenge/summary_card.dart';
-import 'package:dayverse_book/widget/challenge/description_card.dart';
+import 'package:dayverse_book/widget/challenge/challenge_summary_card.dart';
+import 'package:dayverse_book/widget/challenge/challenge_description_card.dart';
 import 'package:dayverse_book/widget/challenge/reading_book_section.dart';
-import 'package:dayverse_book/widget/challenge/read_done_section.dart';
-import 'package:dayverse_book/widget/challenge/routine_calendar.dart';
+import 'package:dayverse_book/widget/challenge/done_book_section.dart';
+import 'package:dayverse_book/widget/challenge/stage_calendar.dart';
 import 'package:dayverse_book/utils/book_pool_loader.dart';
 import 'package:dayverse_book/service/book_api_service.dart'; // fetchBooksByIsbnList
+import 'package:dayverse_book/widget/challenge/repeatable_user_selected_book_done_section.dart';
+import 'dart:io';
+import 'package:intl/intl.dart';
+import 'package:dayverse_book/widget/card_box.dart';
+import 'package:dayverse_book/screen/share_challenge_done_screen.dart';
+import 'package:dayverse_book/widget/recurring_challenge_cover.dart';
 
 class ChallengeDoneScreen extends StatefulWidget {
   final Challenge challenge;
@@ -44,6 +51,21 @@ class _ChallengeDoneScreenState extends State<ChallengeDoneScreen> {
     return widget.challenge.requiredBooks ?? const [];
   }
 
+  ChallengeAttempt? _latestSuccessfulAttempt(Challenge challenge) {
+    for (int i = challenge.attempts.length - 1; i >= 0; i--) {
+      final attempt = challenge.attempts[i];
+      if (attempt.completed && attempt.isSuccessful) {
+        return attempt;
+      }
+    }
+    return null;
+  }
+
+  int _successfulAttemptCount(Challenge challenge) {
+    return challenge.attempts
+        .where((a) => a.completed && a.isSuccessful)
+        .length;
+  }
 
   @override
   void initState() {
@@ -131,128 +153,186 @@ class _ChallengeDoneScreenState extends State<ChallengeDoneScreen> {
   }
 
   Future<void> _loadChallengeRecord() async {
-    final data = await ChallengeRecordService.fetchChallengeRecord(widget.challenge.id);
-    setState(() => recordData = data);
+    try {
+      final data =
+      await ChallengeRecordService.fetchChallengeRecord(widget.challenge.id);
+
+      if (!mounted) return;
+
+      setState(() {
+        recordData = data;
+      });
+    } catch (e) {
+      debugPrint('❌ 챌린지 기록 불러오기 실패: $e');
+
+      if (!mounted) return;
+
+      setState(() {
+        recordData = {};
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final challenge = widget.challenge;
-    final savedBooks = context.watch<SavedBooksProvider>().savedBooks;
 
-    final screenWidth = MediaQuery.of(context).size.width;
-    final screenHeight = MediaQuery.of(context).size.height;
+    final savedBooks =
+        context.watch<SavedBooksProvider>().savedBooks;
 
-    final padding = screenWidth * 0.05;
-    final titleFontSize = screenWidth * 0.05;
-    final sectionSpacing = screenHeight * 0.015;
+    final screenWidth =
+        MediaQuery.of(context).size.width;
+
+    final screenHeight =
+        MediaQuery.of(context).size.height;
+
+    final horizontalPadding =
+        screenWidth * 0.05;
 
     if (recordData == null) {
       return const Scaffold(
         backgroundColor: Color(0xFF013328),
-        body: Center(child: CircularProgressIndicator()),
+        body: Center(
+          child: CircularProgressIndicator(
+            color: Colors.amberAccent,
+            strokeWidth: 2,
+          ),
+        ),
       );
     }
 
     final record = recordData!;
+
     final enrichedRecord = {
       ...record,
       'savedBooks': savedBooks,
     };
 
-    final completed = ChallengeProgressUtils.getCompletedCount(
+    // 기존 계산 로직 유지
+    ChallengeProgressUtils.getCompletedCount(
       challenge,
       enrichedRecord,
-      targetBooksOverride: _displayTargetBooks, // ← 풀/참여/필수 도서 반영
+      targetBooksOverride:
+      _displayTargetBooks,
     );
 
-    final total = ChallengeProgressUtils.getTargetCount(
+    ChallengeProgressUtils.getTargetCount(
       challenge,
-      enrichedRecord, // quantityBased/페이지모드에서도 일관성
-      targetBooksOverride: _displayTargetBooks,
+      enrichedRecord,
+      targetBooksOverride:
+      _displayTargetBooks,
     );
-
 
     return GestureDetector(
-      onHorizontalDragUpdate: (details) {
-        if (details.delta.dx > 20) {
-          Navigator.pop(context);
+      behavior: HitTestBehavior.translucent,
+      onHorizontalDragEnd: (details) {
+        final velocity =
+            details.primaryVelocity ?? 0;
+
+        if (velocity > 500) {
+          _handleBack();
         }
       },
       child: Scaffold(
-        backgroundColor: const Color(0xFF013328),
-        appBar: AppBar(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          centerTitle: true,
-          automaticallyImplyLeading: false,
-          title: Text(
-            challenge.title,
-            style: TextStyle(
-              color: Colors.white,
-              fontFamily: 'kopub',
-              fontSize: screenWidth * 0.05,
-            ),
-          ),
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back, color: Colors.white),
-            onPressed: () {
-              if (Navigator.of(context).canPop()) {
-                Navigator.of(context).pop();
-              } else {
-                Navigator.of(context).pushReplacement(
-                  MaterialPageRoute(builder: (_) => const MainScreen(initialTabIndex: 2)),
-                );
-              }
-            },
-          ),
-          actions: [
-            PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert, color: Colors.white),
-              onSelected: (value) {
-                if (value == 'reset') {
-                  _showResetDialog(context, widget.challenge);
-                }
-              },
-              itemBuilder: (context) => [
-                const PopupMenuItem<String>(
-                  value: 'reset',
-                  child: Center(child: Text('챌린지 리셋하기')),
-                ),
-              ],
-            ),
-          ],
+        backgroundColor:
+        const Color(0xFF013328),
+
+        appBar: _buildAppBar(
+          screenWidth,
         ),
+
         body: SingleChildScrollView(
-          padding: EdgeInsets.all(padding),
+          physics:
+          const BouncingScrollPhysics(),
+          padding: EdgeInsets.fromLTRB(
+            horizontalPadding,
+            screenHeight * 0.015,
+            horizontalPadding,
+            screenHeight * 0.1,
+          ),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment:
+            CrossAxisAlignment.start,
             children: [
-              _buildCelebrationCard(screenWidth),
-              SizedBox(height: sectionSpacing * 0.8),
-              _buildImage(challenge.imageUrl, screenHeight),
-              SizedBox(height: sectionSpacing),
-              const Divider(color: Colors.white24),
-              SizedBox(height: sectionSpacing * 0.6),
-              Text(
-                challenge.title,
-                style: TextStyle(
-                  color: Colors.white,
-                  fontFamily: 'kopub',
-                  fontSize: titleFontSize,
-                  fontWeight: FontWeight.bold,
-                ),
+
+              /// 1. 성취 커버
+              _buildAchievementCover(
+                challenge,
+                screenWidth,
+                screenHeight,
               ),
-              SizedBox(height: sectionSpacing),
-              _buildCompletionCard(screenWidth),
-              SizedBox(height: sectionSpacing),
-              _buildChallengeResultSection(challenge, record, savedBooks),
-              SizedBox(height: sectionSpacing),
-              const Divider(color: Colors.white24),
-              SizedBox(height: sectionSpacing),
-              SummaryCard(challenge: challenge),
-              _buildDetailSection(),
-              SizedBox(height: screenHeight * 0.1),
+
+              SizedBox(
+                height:
+                screenHeight * 0.035,
+              ),
+
+              /// 2. 기록
+              _buildSectionTitle(
+                screenWidth,
+                'CHALLENGE RECORD',
+              ),
+
+              SizedBox(
+                height:
+                screenHeight * 0.015,
+              ),
+
+              _buildChallengeRecordCard(
+                challenge,
+                screenWidth,
+              ),
+
+              SizedBox(
+                height:
+                screenHeight * 0.04,
+              ),
+
+              /// 4. 달성 결과
+              _buildSectionTitle(
+                screenWidth,
+                'CHALLENGE TO-DO',
+              ),
+
+              SizedBox(
+                height:
+                screenHeight * 0.015,
+              ),
+
+              _buildChallengeResultSection(
+                challenge,
+                record,
+                savedBooks,
+              ),
+
+              SizedBox(
+                height:
+                screenHeight * 0.04,
+              ),
+
+              /// 5. 기본 챌린지 정보
+              _buildSectionTitle(
+                screenWidth,
+                'ABOUT CHALLENGE',
+              ),
+
+              SizedBox(
+                height:
+                screenHeight * 0.015,
+              ),
+
+              SummaryCard(
+                challenge: challenge,
+              ),
+
+              if (!challenge.isCustom) ...[
+                SizedBox(
+                  height:
+                  screenHeight * 0.015,
+                ),
+
+                _buildDetailSection(),
+              ],
             ],
           ),
         ),
@@ -260,64 +340,672 @@ class _ChallengeDoneScreenState extends State<ChallengeDoneScreen> {
     );
   }
 
-  Widget _buildCelebrationCard(double screenWidth) {
-    return Container(
+  PreferredSizeWidget _buildAppBar(
+      double screenWidth,
+      ) {
+    return AppBar(
+      backgroundColor:
+      Colors.transparent,
+      elevation: 0,
+      centerTitle: true,
+
+      leading: IconButton(
+        onPressed: _handleBack,
+        icon: const Icon(
+          Icons.arrow_back_rounded,
+          color: Colors.white,
+        ),
+      ),
+
+      title: Text(
+        '챌린지 완료',
+        style: TextStyle(
+          color: Colors.white,
+          fontFamily: 'kopub',
+          fontSize:
+          screenWidth * 0.045,
+          fontWeight:
+          FontWeight.bold,
+        ),
+      ),
+
+      actions: [
+        PopupMenuButton<String>(
+          tooltip: '챌린지 메뉴',
+          color:
+          const Color(0xFF1B2C2E),
+          elevation: 10,
+          offset:
+          const Offset(0, 8),
+          shape: RoundedRectangleBorder(
+            borderRadius:
+            BorderRadius.circular(14),
+            side: BorderSide(
+              color: Colors.white
+                  .withOpacity(0.08),
+            ),
+          ),
+
+          icon: Icon(
+            Icons.more_vert_rounded,
+            color: Colors.white70,
+            size:
+            screenWidth * 0.055,
+          ),
+
+          onSelected: (value) {
+            if (value == 'share') {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ShareChallengeDoneScreen(
+                    challenge: widget.challenge,
+                  ),
+                ),
+              );
+            } else if (value == 'reset') {
+              _showResetDialog(
+                context,
+                widget.challenge,
+              );
+            }
+          },
+
+          itemBuilder: (_) => [
+            const PopupMenuItem<String>(
+              value: 'share',
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.ios_share_rounded,
+                    color: Colors.white70,
+                    size: 19,
+                  ),
+
+                  SizedBox(width: 12),
+
+                  Text(
+                    '공유하기',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontFamily: 'kopub',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const PopupMenuItem<String>(
+              value: 'reset',
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.restart_alt_rounded,
+                    color: Colors.redAccent,
+                    size: 19,
+                  ),
+
+                  SizedBox(width: 12),
+
+                  Text(
+                    '챌린지 초기화',
+                    style: TextStyle(
+                      color: Colors.redAccent,
+                      fontFamily: 'kopub',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+
+        SizedBox(
+          width:
+          screenWidth * 0.01,
+        ),
+      ],
+    );
+  }
+
+  void _handleBack() {
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+      return;
+    }
+
+    Navigator.of(context)
+        .pushReplacement(
+      MaterialPageRoute(
+        builder: (_) =>
+        const MainScreen(
+          initialTabIndex: 2,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAchievementCover(
+      Challenge challenge,
+      double screenWidth,
+      double screenHeight,
+      ) {
+    final successfulCount =
+    _successfulAttemptCount(challenge);
+
+    return CardBox(
+      margin: EdgeInsets.zero,
+      padding: EdgeInsets.zero,
+      child: AspectRatio(
+        aspectRatio: 0.9,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: _buildChallengeImage(
+                  challenge,
+                ),
+              ),
+            ),
+
+            // 전체 어두운 오버레이
+            Positioned.fill(
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  color: Colors.black.withOpacity(0.38),
+                ),
+              ),
+            ),
+
+            // 위아래 그라데이션
+            Positioned.fill(
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.black.withOpacity(0.28),
+                      Colors.black.withOpacity(0.15),
+                      Colors.black.withOpacity(0.45),
+                    ],
+                    stops: const [0.0, 0.45, 1.0],
+                  ),
+                ),
+              ),
+            ),
+
+            // 메인 컨텐츠
+            Positioned.fill(
+              child: Padding(
+                padding: EdgeInsets.symmetric(
+                  horizontal: screenWidth * 0.06,
+                  vertical: screenWidth * 0.06,
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: screenWidth * 0.18,
+                      height: screenWidth * 0.18,
+                      decoration: BoxDecoration(
+                        color: Colors.amberAccent.withOpacity(0.16),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Colors.amberAccent.withOpacity(0.45),
+                        ),
+                      ),
+                      child: Icon(
+                        Icons.emoji_events_rounded,
+                        color: Colors.amberAccent,
+                        size: screenWidth * 0.09,
+                      ),
+                    ),
+
+                    SizedBox(height: screenWidth * 0.03),
+
+                    Text(
+                      'COMPLETED',
+                      style: TextStyle(
+                        color: Colors.amberAccent,
+                        fontFamily: 'kopub',
+                        fontSize: screenWidth * 0.025,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 2,
+                      ),
+                    ),
+
+                    SizedBox(height: screenWidth * 0.03),
+
+                    Text(
+                      challenge.title,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontFamily: 'kopub',
+                        fontSize: screenWidth * 0.052,
+                        fontWeight: FontWeight.bold,
+                        height: 1.35,
+                      ),
+                    ),
+
+                    if (successfulCount > 1) ...[
+                      SizedBox(height: screenWidth * 0.03),
+
+                      Container(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: screenWidth * 0.028,
+                          vertical: screenWidth * 0.012,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.amberAccent.withOpacity(0.14),
+                          borderRadius: BorderRadius.circular(30),
+                          border: Border.all(
+                            color: Colors.amberAccent.withOpacity(0.35),
+                          ),
+                        ),
+                        child: Text(
+                          '$successfulCount회 달성',
+                          style: TextStyle(
+                            color: Colors.amberAccent,
+                            fontFamily: 'kopub',
+                            fontSize: screenWidth * 0.028,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+
+                    SizedBox(height: screenWidth * 0.03),
+
+                    Text(
+                      _getCompletionMessage(successfulCount),
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.82),
+                        fontFamily: 'kopub',
+                        fontSize: screenWidth * 0.03,
+                        height: 1.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            // 완료 체크 뱃지
+            Positioned(
+              right: screenWidth * 0.035,
+              bottom: screenWidth * 0.035,
+              child: Container(
+                width: screenWidth * 0.11,
+                height: screenWidth * 0.11,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF013328).withOpacity(0.92),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: Colors.amberAccent,
+                    width: 1.5,
+                  ),
+                ),
+                child: Icon(
+                  Icons.check_rounded,
+                  color: Colors.amberAccent,
+                  size: screenWidth * 0.065,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _getCompletionMessage(
+      int successfulCount,
+      ) {
+    if (successfulCount >= 10) {
+      return '꾸준한 도전이 멋진 기록으로 쌓였어요.';
+    }
+
+    if (successfulCount >= 5) {
+      return '같은 목표를 여러 번 끝까지 완주했어요.';
+    }
+
+    if (successfulCount >= 2) {
+      return '또 하나의 완주 기록을 만들어냈어요.';
+    }
+
+    return '하나의 도전을 끝까지 완주했어요.';
+  }
+
+  Widget _buildChallengeImage(
+      Challenge challenge,
+      ) {
+    if (RecurringChallengeCover.supports(challenge)) {
+      return RecurringChallengeCover(
+        challenge: challenge,
+        borderRadius: BorderRadius.zero,
+      );
+    }
+
+    final url = challenge.imageUrl;
+
+    if (url.isEmpty) {
+      return _buildImageFallback();
+    }
+
+    if (url.startsWith('http')) {
+      return Image.network(
+        url,
+        width: double.infinity,
+        height: double.infinity,
+        fit: BoxFit.cover,
+        errorBuilder:
+            (_, __, ___) =>
+            _buildImageFallback(),
+      );
+    }
+
+    if (url.startsWith('assets/')) {
+      return Image.asset(
+        url,
+        width: double.infinity,
+        height: double.infinity,
+        fit: BoxFit.cover,
+        errorBuilder:
+            (_, __, ___) =>
+            _buildImageFallback(),
+      );
+    }
+
+    return Image.file(
+      File(url),
       width: double.infinity,
-      padding: EdgeInsets.all(screenWidth * 0.05),
-      decoration: BoxDecoration(
-        color: Colors.amberAccent.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.amberAccent, width: 2),
-      ),
-      child: Center(
-        child: Icon(Icons.emoji_events, color: Colors.amberAccent, size: screenWidth * 0.15),
-      ),
+      height: double.infinity,
+      fit: BoxFit.cover,
+      errorBuilder:
+          (_, __, ___) =>
+          _buildImageFallback(),
     );
   }
 
-  Widget _buildImage(String url, double screenHeight) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(12),
-      child: Image.asset(url,
-          width: double.infinity,
-          height: screenHeight * 0.4,
-          fit: BoxFit.cover),
-    );
-  }
-
-  Widget _buildCompletionCard(double screenWidth) {
-    final fontSize = screenWidth * 0.035;
-
+  Widget _buildImageFallback() {
     return Container(
-      padding: EdgeInsets.all(screenWidth * 0.04),
-      decoration: BoxDecoration(
-        color: Colors.white10,
-        borderRadius: BorderRadius.circular(12),
+      color:
+      Colors.white.withOpacity(
+        0.055,
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: const Center(
+        child: Icon(
+          Icons
+              .emoji_events_outlined,
+          color:
+          Colors.white38,
+          size: 48,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChallengeRecordCard(
+      Challenge challenge,
+      double screenWidth,
+      ) {
+    final attempt =
+    _latestSuccessfulAttempt(
+      challenge,
+    );
+
+    final startedAt =
+        attempt?.startDate;
+
+    final completedAt =
+        attempt?.completedAt ??
+            (
+                attempt?.completed == true &&
+                    attempt
+                        ?.isSuccessful ==
+                        true
+                    ? attempt?.endDate
+                    : null
+            );
+
+    final hasSeparateAttemptHistory =
+    _isRepeatableUserSelectedPageChallenge(
+      challenge,
+    );
+
+    if (hasSeparateAttemptHistory) {
+      final successfulCount =
+      _successfulAttemptCount(
+        challenge,
+      );
+
+      return CardBox(
+        margin: EdgeInsets.zero,
+        padding: EdgeInsets.symmetric(
+          vertical:
+          screenWidth * 0.04,
+          horizontal:
+          screenWidth * 0.035,
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child:
+              _buildRecordItem(
+                value:
+                '$successfulCount회',
+                label:
+                '누적 달성',
+                screenWidth:
+                screenWidth,
+              ),
+            ),
+
+            _buildRecordDivider(
+              screenWidth,
+            ),
+
+            Expanded(
+              child:
+              _buildRecordItem(
+                value: completedAt != null
+                    ? _formatShortDate(
+                  completedAt,
+                )
+                    : '-',
+                label:
+                '최근 완료',
+                screenWidth:
+                screenWidth,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final duration =
+    startedAt != null &&
+        completedAt != null
+        ? _calculateChallengeDays(
+      startedAt,
+      completedAt,
+    )
+        : null;
+
+    return CardBox(
+      margin: EdgeInsets.zero,
+      padding: EdgeInsets.symmetric(
+        vertical:
+        screenWidth * 0.04,
+        horizontal:
+        screenWidth * 0.02,
+      ),
+      child: Row(
         children: [
-          Center(
-            child: Text("🎉 축하합니다, 해내셨군요! 🎉",
-                style: TextStyle(color: Colors.amberAccent, fontSize: fontSize, fontWeight: FontWeight.bold, fontFamily: 'Kopub')),
+          Expanded(
+            child:
+            _buildRecordItem(
+              value: startedAt != null
+                  ? _formatShortDate(
+                startedAt,
+              )
+                  : '-',
+              label:
+              '시작',
+              screenWidth:
+              screenWidth,
+            ),
           ),
-          Center(
-            child: Text("더욱 성장하시길 응원합니다 ☀️",
-                style: TextStyle(color: Colors.white70, fontSize: fontSize, fontWeight: FontWeight.bold, fontFamily: 'Kopub')),
+
+          _buildRecordDivider(
+            screenWidth,
           ),
-          SizedBox(height: screenWidth * 0.02),
-          LinearProgressIndicator(
-            value: 1.0,
-            backgroundColor: Colors.white24,
-            valueColor: const AlwaysStoppedAnimation<Color>(Colors.amberAccent),
-            minHeight: screenWidth * 0.02,
+
+          Expanded(
+            child:
+            _buildRecordItem(
+              value: completedAt != null
+                  ? _formatShortDate(
+                completedAt,
+              )
+                  : '-',
+              label:
+              '완료',
+              screenWidth:
+              screenWidth,
+            ),
           ),
-          SizedBox(height: screenWidth * 0.03),
-          Text("100% 완료",
-              style: TextStyle(color: Colors.white, fontFamily: 'kopub', fontSize: fontSize*0.9)),
+
+          _buildRecordDivider(
+            screenWidth,
+          ),
+
+          Expanded(
+            child:
+            _buildRecordItem(
+              value: duration != null
+                  ? '$duration일'
+                  : '-',
+              label:
+              '도전 기간',
+              screenWidth:
+              screenWidth,
+            ),
+          ),
         ],
       ),
     );
+  }
+
+  Widget _buildRecordItem({
+    required String value,
+    required String label,
+    required double screenWidth,
+  }) {
+    return Column(
+      children: [
+        Text(
+          value,
+          textAlign:
+          TextAlign.center,
+          style: TextStyle(
+            color: Colors.white,
+            fontFamily:
+            'kopub',
+            fontSize:
+            screenWidth * 0.035,
+            fontWeight:
+            FontWeight.bold,
+          ),
+        ),
+
+        SizedBox(
+          height:
+          screenWidth * 0.012,
+        ),
+
+        Text(
+          label,
+          textAlign:
+          TextAlign.center,
+          style: TextStyle(
+            color:
+            Colors.white38,
+            fontFamily:
+            'kopub',
+            fontSize:
+            screenWidth * 0.026,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRecordDivider(
+      double screenWidth,
+      ) {
+    return Container(
+      width: 1,
+      height:
+      screenWidth * 0.09,
+      color:
+      Colors.white.withOpacity(
+        0.08,
+      ),
+    );
+  }
+
+  Widget _buildSectionTitle(
+      double screenWidth,
+      String title,
+      ) {
+    return Text(
+      title,
+      style: TextStyle(
+        color: Colors.white
+            .withOpacity(0.72),
+        fontFamily: 'kopub',
+        fontSize:
+        screenWidth * 0.032,
+        fontWeight:
+        FontWeight.w600,
+        letterSpacing: 1.5,
+      ),
+    );
+  }
+
+  String _formatShortDate(
+      DateTime date,
+      ) {
+    return DateFormat(
+      'yy.MM.dd',
+    ).format(date);
+  }
+
+  int _calculateChallengeDays(
+      DateTime startedAt,
+      DateTime completedAt,
+      ) {
+    final startDate = DateTime(
+      startedAt.year,
+      startedAt.month,
+      startedAt.day,
+    );
+
+    final completionDate = DateTime(
+      completedAt.year,
+      completedAt.month,
+      completedAt.day,
+    );
+
+    return completionDate.difference(startDate).inDays + 1;
   }
 
   Widget _buildChallengeResultSection(
@@ -326,8 +1014,26 @@ class _ChallengeDoneScreenState extends State<ChallengeDoneScreen> {
       List<BookModel> savedBooks,
       ) {
     final checkAction = getChallengeCheckActionType(challenge);
-    final attempt = challenge.attempts.isNotEmpty ? challenge.attempts.last : null;
+    final attempt = _isRepeatableUserSelectedPageChallenge(challenge)
+        ? _latestSuccessfulAttempt(challenge)
+        : (challenge.attempts.isNotEmpty ? challenge.attempts.last : null);
+
     final completedBookIds = attempt?.completedBookIds ?? [];
+
+    // 0. 반복형 + 사용자지정도서 + 페이지연동 완료 전용
+    if (_isRepeatableUserSelectedPageChallenge(challenge)) {
+      final successAttempt = _latestSuccessfulAttempt(challenge);
+
+      if (successAttempt == null) {
+        return const SizedBox(); // 또는 fallback UI
+      }
+
+      return RepeatableUserSelectedBookDoneSection(
+        challenge: challenge,
+        attempt: successAttempt,
+        savedBooks: savedBooks,
+      );
+    }
 
     // 1. 사용자지정/운영자지정 도서 기반 챌린지
     if (challenge.method == ChallengeMethod.specificBooks) {
@@ -336,24 +1042,24 @@ class _ChallengeDoneScreenState extends State<ChallengeDoneScreen> {
         savedBooks: savedBooks,
         completedBookIds: completedBookIds,
         isDoneMode: true,
-        booksOverride: _displayTargetBooks, // ✅ 풀/참여/필수 도서
+        booksOverride: _displayTargetBooks,
       );
     }
 
-    // 2. 지정권수 도전 (서재 연동형)
+    // 2. 지정권수 도전
     if (challenge.method == ChallengeMethod.quantityBased) {
-      return ReadDoneSection(
+      return DoneBookSection(
         challenge: challenge,
         completedBookIds: completedBookIds,
         isDoneMode: true,
-        booksOverride: _displayTargetBooks, // ✅ (타겟 제한이 있을 때 정확도↑)
+        booksOverride: _displayTargetBooks,
       );
     }
 
-    // 3. 루틴형 챌린지 (타이머/페이지 기반)
+    // 3. 루틴형
     if (challenge.category == ChallengeCategory.routine &&
         checkAction != ChallengeCheckActionType.libraryAuto) {
-      return RoutineCalendar(
+      return StageCalendar(
         challenge: challenge,
         recordDataOrBooks: record,
         isDoneMode: true,
@@ -364,64 +1070,135 @@ class _ChallengeDoneScreenState extends State<ChallengeDoneScreen> {
   }
 
   Widget _buildDetailSection() {
+    final screenWidth =
+        MediaQuery.of(context).size.width;
+
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment:
+      CrossAxisAlignment.start,
       children: [
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton.icon(
-            style: TextButton.styleFrom(
-              padding: EdgeInsets.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            onPressed: () => setState(() => showDetails = !showDetails),
-            icon: Text(
-              showDetails ? "챌린지 상세내용 접기" : "📂 챌린지 정보 상세보기",
-              style: const TextStyle(
-                color: Colors.white70,
-                fontFamily: 'kopub',
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            label: Icon(
-              showDetails ? Icons.expand_less : Icons.expand_more,
-              color: Colors.white,
-            ),
+        CardBox(
+          margin: EdgeInsets.zero,
+          padding: EdgeInsets.symmetric(
+            horizontal:
+            screenWidth * 0.035,
+            vertical:
+            screenWidth * 0.012,
           ),
-        ),
-        if (showDetails)
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          onTap: () {
+            setState(() {
+              showDetails =
+              !showDetails;
+            });
+          },
+          child: Row(
             children: [
-              if (widget.challenge.longDescription != null)
-                DescriptionCard(
-                  title: "📖 챌린지 소개",
-                  content: widget.challenge.longDescription!,
+              Icon(
+                Icons
+                    .info_outline_rounded,
+                color:
+                Colors.white54,
+                size:
+                screenWidth * 0.045,
+              ),
+
+              SizedBox(
+                width:
+                screenWidth * 0.02,
+              ),
+
+              Expanded(
+                child: Text(
+                  showDetails
+                      ? '챌린지 상세내용 접기'
+                      : '챌린지 상세보기',
+                  style:
+                  TextStyle(
+                    color:
+                    Colors.white70,
+                    fontFamily:
+                    'kopub',
+                    fontSize:
+                    screenWidth *
+                        0.031,
+                    fontWeight:
+                    FontWeight.w600,
+                  ),
                 ),
-              if (widget.challenge.goalDescription != null)
-                DescriptionCard(
-                  title: "🎯 챌린지 목표",
-                  content: widget.challenge.goalDescription!,
-                ),
-              if (widget.challenge.recommendedFor != null)
-                DescriptionCard(
-                  title: "🙋 이런 분께 추천",
-                  content: widget.challenge.recommendedFor!,
-                ),
-              if (widget.challenge.guideText != null)
-                DescriptionCard(
-                  title: "📌 진행 방법",
-                  content: widget.challenge.guideText!,
-                ),
+              ),
+
+              Icon(
+                showDetails
+                    ? Icons
+                    .expand_less_rounded
+                    : Icons
+                    .expand_more_rounded,
+                color:
+                Colors.white38,
+              ),
             ],
           ),
+        ),
+
+        if (showDetails) ...[
+          SizedBox(
+            height:
+            screenWidth * 0.025,
+          ),
+
+          if (widget.challenge
+              .longDescription !=
+              null)
+            DescriptionCard(
+              title:
+              '챌린지 소개',
+              content: widget
+                  .challenge
+                  .longDescription!,
+            ),
+
+          if (widget.challenge
+              .goalDescription !=
+              null)
+            DescriptionCard(
+              title:
+              '챌린지 목표',
+              content: widget
+                  .challenge
+                  .goalDescription!,
+            ),
+
+          if (widget.challenge
+              .recommendedFor !=
+              null)
+            DescriptionCard(
+              title:
+              '이런 분께 추천',
+              content: widget
+                  .challenge
+                  .recommendedFor!,
+            ),
+
+          if (widget.challenge
+              .guideText !=
+              null)
+            DescriptionCard(
+              title:
+              '진행 방법',
+              content: widget
+                  .challenge
+                  .guideText!,
+            ),
+        ],
       ],
     );
   }
 
   void _showNextStageDialog(Challenge challenge) {
     final totalStages = challenge.stageDurations?.length ?? 0;
-    final completedStages = challenge.attempts.where((a) => a.completed).length;
+    final completedStages = challenge.attempts
+        .where((a) => a.completed && a.isSuccessful)
+        .length;
 
     if (completedStages >= totalStages) return;
 
@@ -518,6 +1295,13 @@ class _ChallengeDoneScreenState extends State<ChallengeDoneScreen> {
         );
       },
     );
+  }
+
+  bool _isRepeatableUserSelectedPageChallenge(Challenge c) {
+    return c.stageType == ChallengeStageType.single &&
+        c.method == ChallengeMethod.specificBooks &&
+        c.specificBookMode == SpecificBookMode.userDefined &&
+        c.isRepeatable == true;
   }
 
 }

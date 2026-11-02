@@ -10,12 +10,18 @@ import 'package:dayverse_book/provider/custom_library_provider.dart';
 import 'package:dayverse_book/main.dart';
 import 'package:dayverse_book/utils/challenge_check_utils.dart';
 import 'package:dayverse_book/utils/challenge_progress_utils.dart';
+import 'package:dayverse_book/service/book_image_service.dart';
+import 'package:dayverse_book/model/memo_model.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:dayverse_book/service/memo_image_service.dart';
 
 
 class SavedBooksProvider extends ChangeNotifier {
   List<BookModel> _savedBooks = [];
   final List<Map<String, dynamic>> _bookRecords = [];
+
   bool _disposed = false;
+  bool _isLoaded = false;
 
   void safeNotifyListeners() {
     if (!_disposed) notifyListeners();
@@ -29,17 +35,84 @@ class SavedBooksProvider extends ChangeNotifier {
 
   List<BookModel> get savedBooks => _savedBooks;
   List<Map<String, dynamic>> get bookRecords => _bookRecords;
+  bool get isLoaded => _isLoaded;
 
   /// 📌 책 추가 또는 갱신
   Future<void> addOrUpdateBook(BookModel book) async {
-    final index = _savedBooks.indexWhere((b) => b.id == book.id);
+    final index = _savedBooks.indexWhere(
+          (savedBook) => savedBook.id == book.id,
+    );
+
+    final previousBook =
+    index != -1 ? _savedBooks[index] : null;
+
     if (index != -1) {
       _savedBooks[index] = book;
     } else {
       _savedBooks.insert(0, book);
     }
-    await BookService.saveBookToFirestore(book.toFirestore());
-    safeNotifyListeners(); // ✅ 저장 후에 알림 (라우팅 꼬임 방지 가능성)
+
+    try {
+      await BookService.saveBookToFirestore(
+        book.toFirestore(),
+      );
+
+      safeNotifyListeners();
+    } catch (e) {
+      if (index != -1 && previousBook != null) {
+        _savedBooks[index] = previousBook;
+      } else {
+        _savedBooks.removeWhere(
+              (savedBook) => savedBook.id == book.id,
+        );
+      }
+
+      safeNotifyListeners();
+      rethrow;
+    }
+  }
+
+  /// 사용자가 직접 입력한 책 저장
+  Future<void> addSelfRegisteredBook(BookModel book) async {
+    final hasDuplicate = hasDuplicateSelfRegisteredBook(
+      title: book.title,
+      author: book.author,
+      publisher: book.publisher,
+      isbn: book.isbn,
+    );
+
+    if (hasDuplicate) {
+      throw StateError('이미 등록된 책입니다.');
+    }
+
+    _savedBooks.insert(0, book);
+
+    try {
+      await BookService.saveBookToFirestore(
+        book.toFirestore(),
+      );
+
+      safeNotifyListeners();
+    } catch (e) {
+      // 책 저장 자체가 실패한 경우에만 로컬 목록 복구
+      _savedBooks.removeWhere(
+            (savedBook) => savedBook.id == book.id,
+      );
+
+      safeNotifyListeners();
+      rethrow;
+    }
+
+    // 책 저장은 이미 완료됐으므로 챌린지 오류로 책을 롤백하지 않음
+    if (book.category == 'done') {
+      try {
+        await updateChallengeProgressForNewBook(book);
+      } catch (e) {
+        debugPrint(
+          '⚠️ 직접 등록 책 챌린지 진행률 갱신 실패: $e',
+        );
+      }
+    }
   }
 
   /// 📌 페이지 수 업데이트 (단독)
@@ -128,20 +201,93 @@ class SavedBooksProvider extends ChangeNotifier {
   }
 
   /// 📌 책 삭제
-  Future<void> removeBook(String bookId, CustomLibraryProvider customLibraryProvider) async {
+  Future<void> removeBook(
+      String bookId,
+      CustomLibraryProvider customLibraryProvider,
+      ) async {
+    final book = getBookByIdOrNull(bookId);
+
     _savedBooks.removeWhere((book) => book.id == bookId);
-    _bookRecords.removeWhere((record) => record['bookId'] == bookId);
+    _bookRecords.removeWhere(
+          (record) => record['bookId'] == bookId,
+    );
+
     customLibraryProvider.removeBookEverywhere(bookId);
     safeNotifyListeners();
-    await BookService.deleteBookFromFirestore(bookId);
 
-    final bookRecordIds = (await BookService.getRecordsFromFirestore())
-        .where((r) => r['bookId'] == bookId)
-        .map((r) => r['recordId'])
-        .toList();
-    for (final recordId in bookRecordIds) {
-      await BookService.deleteRecordFromFirestore(recordId);
+    try {
+      await BookService.deleteBookFromFirestore(bookId);
+
+      final imageUrl = book?.imageUrl ?? '';
+
+      final isUploadedBookCover =
+          imageUrl.contains('/book_covers') ||
+              imageUrl.contains('book_covers%2F');
+
+      if (isUploadedBookCover) {
+        try {
+          await BookImageService.deleteBookCover(imageUrl);
+        } catch (e) {
+          debugPrint('⚠️ 직접 등록 책 표지 삭제 실패: $e');
+        }
+      }
+
+      final bookRecordIds =
+      (await BookService.getRecordsFromFirestore())
+          .where(
+            (record) => record['bookId'] == bookId,
+      )
+          .map(
+            (record) => record['recordId'],
+      )
+          .whereType<String>()
+          .toList();
+
+      for (final recordId in bookRecordIds) {
+        await BookService.deleteRecordFromFirestore(recordId);
+      }
+    } catch (e) {
+      // 필요하면 나중에 삭제 실패 롤백 처리
+      rethrow;
     }
+  }
+
+  bool hasDuplicateSelfRegisteredBook({
+    required String title,
+    required String author,
+    String? publisher,
+    String? isbn,
+  }) {
+    String normalize(String value) {
+      return value
+          .trim()
+          .toLowerCase()
+          .replaceAll(RegExp(r'\s+'), '');
+    }
+
+    final normalizedIsbn = (isbn ?? '')
+        .replaceAll(RegExp(r'[^0-9Xx]'), '')
+        .toUpperCase();
+
+    final normalizedTitle = normalize(title);
+    final normalizedAuthor = normalize(author);
+    final normalizedPublisher = normalize(publisher ?? '');
+
+    return _savedBooks.any((book) {
+      final savedIsbn = (book.isbn ?? '')
+          .replaceAll(RegExp(r'[^0-9Xx]'), '')
+          .toUpperCase();
+
+      // 양쪽 모두 ISBN이 있으면 ISBN으로 비교
+      if (normalizedIsbn.isNotEmpty && savedIsbn.isNotEmpty) {
+        return normalizedIsbn == savedIsbn;
+      }
+
+      // ISBN이 없으면 제목 + 지은이 + 출판사로 비교
+      return normalize(book.title) == normalizedTitle &&
+          normalize(book.author) == normalizedAuthor &&
+          normalize(book.publisher ?? '') == normalizedPublisher;
+    });
   }
 
   /// 📌 카테고리 업데이트
@@ -206,6 +352,7 @@ class SavedBooksProvider extends ChangeNotifier {
   void clearAll() {
     _savedBooks.clear();
     _bookRecords.clear();
+    _isLoaded = false;
     safeNotifyListeners();
   }
 
@@ -228,6 +375,7 @@ class SavedBooksProvider extends ChangeNotifier {
       }
     }
 
+    _isLoaded = true;
     safeNotifyListeners();
   }
 
@@ -238,11 +386,302 @@ class SavedBooksProvider extends ChangeNotifier {
     safeNotifyListeners();
   }
 
+  /// 메모 기록인지 확인
+  bool _isMemoRecord(
+      Map<String, dynamic> record,
+      ) {
+    final type = record['type']?.toString();
+
+    if (type == 'memo') {
+      return true;
+    }
+
+    if (type == 'timer') {
+      return false;
+    }
+
+    // 기존 데이터 호환
+    return record['content'] !=
+        '독서 타이머 기록';
+  }
+
+  /// 기존 Map 기록을 MemoModel로 변환
+  MemoModel _recordToMemo(
+      Map<String, dynamic> record,
+      ) {
+    return MemoModel.fromMap(
+      {
+        ...record,
+        'id': record['recordId'] ??
+            record['id'],
+        'createdAt': record['createdAt'] ??
+            record['savedAt'],
+        'updatedAt': record['updatedAt'] ??
+            record['createdAt'] ??
+            record['savedAt'],
+        'imageUrls':
+        record['imageUrls'] ??
+            const <String>[],
+      },
+      documentId:
+      record['recordId']?.toString() ??
+          record['id']?.toString(),
+    );
+  }
+
+  /// MemoModel을 로컬 기록 Map으로 변환
+  Map<String, dynamic> _memoToRecord(
+      MemoModel memo,
+      ) {
+    return {
+      ...memo.toMap(),
+      'id': memo.id,
+      'recordId': memo.id,
+      'bookId': memo.bookId,
+      'content': memo.content,
+      'imageUrls': memo.imageUrls,
+      'type': 'memo',
+
+      // 기존 화면 및 정렬 코드 호환
+      'savedAt':
+      memo.updatedAt.toIso8601String(),
+    };
+  }
+
+  /// 특정 책의 전체 메모
+  List<MemoModel> getMemosForBook(
+      String bookId,
+      ) {
+    final memos = _bookRecords
+        .where(
+          (record) =>
+      record['bookId'] == bookId &&
+          _isMemoRecord(record),
+    )
+        .map(_recordToMemo)
+        .toList();
+
+    memos.sort(
+          (a, b) =>
+          b.createdAt.compareTo(a.createdAt),
+    );
+
+    return memos;
+  }
+
+  /// 사용자의 전체 메모
+  List<MemoModel> get allMemos {
+    final memos = _bookRecords
+        .where(_isMemoRecord)
+        .map(_recordToMemo)
+        .toList();
+
+    memos.sort(
+          (a, b) =>
+          b.createdAt.compareTo(a.createdAt),
+    );
+
+    return memos;
+  }
+
+  /// 특정 책의 메모 개수
+  int getMemoCountForBook(
+      String bookId,
+      ) {
+    return _bookRecords.where(
+          (record) =>
+      record['bookId'] == bookId &&
+          _isMemoRecord(record),
+    ).length;
+  }
+
+  /// 특정 책의 최근 메모
+  MemoModel? getLatestMemoForBook(
+      String bookId,
+      ) {
+    final memos = getMemosForBook(bookId);
+
+    return memos.isEmpty ? null : memos.first;
+  }
+
+  /// 최근 메모 목록
+  List<MemoModel> getRecentMemos({
+    int limit = 2,
+    String? bookId,
+  }) {
+    final memos = bookId == null
+        ? allMemos
+        : getMemosForBook(bookId);
+
+    if (limit <= 0) {
+      return const [];
+    }
+
+    return memos.take(limit).toList();
+  }
+
+  /// 새 메모 추가
+  Future<MemoModel> addMemo({
+    required String bookId,
+    required String content,
+    List<String> imageUrls = const [],
+  }) async {
+    final trimmedContent = content.trim();
+
+    if (trimmedContent.isEmpty &&
+        imageUrls.isEmpty) {
+      throw ArgumentError(
+        '메모 내용 또는 이미지가 필요합니다.',
+      );
+    }
+
+    final memo =
+    await BookService.addMemoToFirestore(
+      bookId: bookId,
+      content: trimmedContent,
+      imageUrls: imageUrls,
+    );
+
+    _bookRecords.insert(
+      0,
+      _memoToRecord(memo),
+    );
+
+    safeNotifyListeners();
+
+    return memo;
+  }
+
+  /// 기존 메모 수정
+  Future<MemoModel> updateMemo({
+    required MemoModel memo,
+    required String content,
+    List<String>? imageUrls,
+  }) async {
+    final updatedMemo =
+    await BookService.updateMemoInFirestore(
+      memo: memo,
+      content: content,
+      imageUrls: imageUrls,
+    );
+
+    final index = _bookRecords.indexWhere(
+          (record) {
+        final recordId =
+            record['recordId']?.toString() ??
+                record['id']?.toString();
+
+        return recordId == memo.id;
+      },
+    );
+
+    if (index != -1) {
+      _bookRecords[index] =
+          _memoToRecord(updatedMemo);
+    } else {
+      // 로컬에 없으면 안전하게 목록에 추가
+      _bookRecords.insert(
+        0,
+        _memoToRecord(updatedMemo),
+      );
+    }
+
+    _sortRecordsBySavedAt();
+    safeNotifyListeners();
+
+    return updatedMemo;
+  }
+
+  /// 메모 삭제
+  Future<void> deleteMemo(
+      String memoId,
+      ) async {
+    if (memoId.trim().isEmpty) {
+      throw ArgumentError(
+        '삭제할 메모 ID가 없습니다.',
+      );
+    }
+
+    await BookService.deleteMemoFromFirestore(
+      memoId,
+    );
+
+    _bookRecords.removeWhere(
+          (record) {
+        final recordId =
+            record['recordId']?.toString() ??
+                record['id']?.toString();
+
+        return recordId == memoId;
+      },
+    );
+
+    safeNotifyListeners();
+  }
+
+  void _sortRecordsBySavedAt() {
+    _bookRecords.sort((a, b) {
+      final dateA = _recordDateTime(a);
+      final dateB = _recordDateTime(b);
+
+      return dateB.compareTo(dateA);
+    });
+  }
+
+  DateTime _recordDateTime(
+      Map<String, dynamic> record,
+      ) {
+    final value = record['updatedAt'] ??
+        record['createdAt'] ??
+        record['savedAt'];
+
+    if (value is DateTime) {
+      return value;
+    }
+
+    if (value is Timestamp) {
+      return value.toDate();
+    }
+
+    return DateTime.tryParse(
+      value?.toString() ?? '',
+    ) ??
+        DateTime.fromMillisecondsSinceEpoch(0);
+  }
+
+  Future<String> uploadMemoImage({
+    required String bookId,
+    required String imagePath,
+  }) async {
+    return MemoImageService.uploadMemoImage(
+      bookId: bookId,
+      imagePath: imagePath,
+    );
+  }
+
+  Future<void> deleteMemoImage(
+      String imageUrl,
+      ) async {
+    await MemoImageService.deleteMemoImage(
+      imageUrl,
+    );
+  }
+
   /// 📌 책별 기록 추가
   Future<void> addRecord(String bookId, String content) async {
     final savedAt = DateTime.now().toIso8601String();
     final recordId = await BookService.addRecordToFirestore(bookId, content, savedAt);
-    final record = {"bookId": bookId, "savedAt": savedAt, "content": content, "recordId": recordId};
+    final record = {
+      'id': recordId,
+      'recordId': recordId,
+      'bookId': bookId,
+      'content': content,
+      'savedAt': savedAt,
+      'createdAt': savedAt,
+      'updatedAt': savedAt,
+      'imageUrls': <String>[],
+      'type': 'memo',
+    };
     _bookRecords.insert(0, record);
     safeNotifyListeners();
   }
@@ -409,7 +848,6 @@ class SavedBooksProvider extends ChangeNotifier {
     }
   }
 
-
   /// 📌 Firestore에서 책 목록과 기록을 다시 불러오기
   Future<void> reloadFromFirestore() async {
     final booksMap = await BookService.getBooksFromFirestore();
@@ -433,8 +871,10 @@ class SavedBooksProvider extends ChangeNotifier {
   void clearData() {
     _savedBooks.clear();
     _bookRecords.clear();
+    _isLoaded = false;
     safeNotifyListeners();
   }
+
   /// 읽은 책 별점
   void updateBookRating(String bookId, double newRating) {
     final index = _savedBooks.indexWhere((b) => b.id == bookId);
@@ -517,5 +957,85 @@ class SavedBooksProvider extends ChangeNotifier {
     }
     return null;
   }
+
+  Future<void> updateBookSpineCache({
+    required String bookId,
+    required String? yes24ItemId,
+    required String? spineUrl,
+  }) async {
+    final index =
+    _savedBooks.indexWhere(
+          (book) => book.id == bookId,
+    );
+
+    if (index == -1) {
+      return;
+    }
+
+    final original =
+    _savedBooks[index];
+
+    final normalizedSpineUrl =
+    spineUrl?.trim();
+
+    final hasSpineUrl =
+        normalizedSpineUrl != null &&
+            normalizedSpineUrl.isNotEmpty;
+
+    final updatedBook =
+    original.copyWith(
+      yes24ItemId: yes24ItemId,
+      spineUrl:
+      hasSpineUrl
+          ? normalizedSpineUrl
+          : null,
+      clearSpineUrl: !hasSpineUrl,
+      spineChecked: true,
+    );
+
+    _savedBooks[index] =
+        updatedBook;
+
+    safeNotifyListeners();
+
+    try {
+      await BookService.updateBookInFirestore(
+        bookId,
+        {
+          'yes24ItemId': yes24ItemId,
+          'spineUrl':
+          hasSpineUrl
+              ? normalizedSpineUrl
+              : null,
+          'spineChecked': true,
+        },
+      );
+
+      debugPrint(
+        '[SPINE CACHE SAVED] '
+            '${original.title} / '
+            'itemId=$yes24ItemId / '
+            'spineUrl=$normalizedSpineUrl',
+      );
+    } catch (e) {
+      // Firestore 저장 실패 시 로컬도 원상복구
+      _savedBooks[index] =
+          original;
+
+      safeNotifyListeners();
+
+      debugPrint(
+        '[SPINE CACHE ERROR] '
+            '${original.title} / $e',
+      );
+
+      rethrow;
+    }
+  }
+
+  bool containsBookId(String bookId) {
+    return _savedBooks.any((book) => book.id == bookId);
+  }
+
 
 }
