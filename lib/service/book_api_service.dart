@@ -1,290 +1,360 @@
-import 'dart:convert';
-import 'package:flutter/foundation.dart'; // ✅ debugPrint 사용 시 필요
-import 'package:http/http.dart' as http;
+import 'package:flutter/foundation.dart';
 import 'package:dayverse_book/model/book_model.dart';
+import 'package:dayverse_book/service/yes24_book_service.dart';
+import 'package:dayverse_book/utils/book_utils.dart';
 
 class BookApiService {
-  static const String _baseUrl = 'https://www.aladin.co.kr/ttb/api/ItemSearch.aspx';
-  static const String _apiKey = 'ttbljunlsool2051001';
+  /// YES24 도서 검색
+  static Future<List<BookModel>> searchBooks(
+    String query, {
+    int maxResults = 15,
+  }) async {
+    final trimmedQuery = query.trim();
 
-  static const String _naverClientId = 'THeSZORYA2Ce_woLCqYj'; // 네 ID
-  static const String _naverClientSecret = 'N7n4FudxCH';        // 네 시크릿
-
-  /// 🔧 긴 문자열을 안전하게 출력 (잘리지 않게)
-  static void debugPrintLongText(String text) {
-    const int chunkSize = 800;
-    for (var i = 0; i < text.length; i += chunkSize) {
-      final chunk = text.substring(i, i + chunkSize > text.length ? text.length : i + chunkSize);
-      debugPrint(chunk);
+    if (trimmedQuery.isEmpty) {
+      return [];
     }
-  }
 
-  /// 📘 책 검색 (간략 정보)
-  static Future<List<BookModel>> searchBooks(String query) async {
-    final uri = Uri.parse(
-      '$_baseUrl?ttbkey=$_apiKey&Query=$query&QueryType=Title&SearchTarget=Book&output=JS&Version=20131101&Cover=Big',
-    );
-    final response = await http.get(uri);
-    if (response.statusCode == 200) {
-      final data = json.decode(response.body);
-      final items = data['item'] as List<dynamic>? ?? [];
-      return items.map((item) => BookModel.fromAladinApi(item)).toList();
-    } else {
-      throw Exception('알라딘 API 호출 실패: ${response.statusCode}');
-    }
-  }
+    try {
+      final yes24Books = await Yes24BookService.searchBooks(
+        trimmedQuery,
+        maxResults: maxResults,
+      );
 
-  /// 📖 상세 정보 조회 (페이지 수 등)
-  static Future<BookModel?> fetchBookDetail(String itemId) async {
-    final uri = Uri.parse(
-      'https://www.aladin.co.kr/ttb/api/ItemLookUp.aspx'
-          '?ttbkey=$_apiKey'
-          '&itemId=$itemId'
-          '&ItemIdType=ItemId'
-          '&output=JS'
-          '&Version=20131101',
-    );
+      final results = <BookModel>[];
 
-    //debugPrint("📘 [API 요청] 상세 조회 요청 itemId: $itemId");
+      for (final data in yes24Books) {
+        final title = data['title']?.toString().trim() ?? '';
+        final author = data['author']?.toString().trim() ?? '';
+        final isbn = data['isbn13']?.toString().trim() ?? '';
 
-    final response = await http.get(uri);
+        if (title.isEmpty) {
+          continue;
+        }
 
-    if (response.statusCode == 200) {
-      final data = json.decode(response.body);
-      final items = data['item'] as List<dynamic>? ?? [];
-      if (items.isNotEmpty) {
-        final item = items[0];
-        //debugPrintLongText('[📦 상세조회 item 데이터] ${json.encode(item)}'); // ✅ 긴 JSON 안전 출력
+        final pageCount = int.tryParse(
+              data['pageCount']?.toString() ?? '',
+            ) ??
+            0;
 
-        final pageCountFromApi = int.tryParse(
-          item['itemPage']?.toString() ??
-              item['subInfo']?['itemPage']?.toString() ??
-              '0',
-        ) ?? 0;
+        final yes24ItemId = data['yes24ItemId']?.toString();
 
-        //debugPrint("📘 [파싱 확인] 추출된 pageCount: $pageCountFromApi");
+        results.add(
+          BookModel(
+            id: generateBookId(
+              isbn.isEmpty ? null : isbn,
+              title,
+              author,
+            ),
+            title: title,
+            author: author,
+            publisher: data['publisher']?.toString(),
+            isbn: isbn.isEmpty ? null : isbn,
+            description: data['description']?.toString(),
+            imageUrl: data['coverUrl']?.toString(),
 
-        final coverUrl = item['cover'] ?? '';
-        //debugPrint('[📷 표지 이미지 URL] $coverUrl');
+            // 알라딘 상품 ID는 사용하지 않음
+            itemId: null,
 
-        final book = BookModel.fromAladinApi(item);
-        //debugPrint("📘 [최종 전달할 BookModel] pageCount: ${book.pageCount}, title: ${book.title}");
-        return book;
+            // YES24 상품 ID
+            yes24ItemId: yes24ItemId,
+
+            pageCount: pageCount > 0 ? pageCount : 0,
+            pageRead: 0,
+            rereadCount: 1,
+            category: 'want',
+            customLibraries: const [],
+          ),
+        );
       }
-    } else {
-      throw Exception('알라딘 상세 정보 API 실패: ${response.statusCode}');
+
+      debugPrint(
+        'YES24 검색 성공: ${results.length}권',
+      );
+
+      return results.take(maxResults).toList();
+    } catch (e, stackTrace) {
+      debugPrint('YES24 검색 실패: $e');
+      debugPrint('$stackTrace');
+      return [];
     }
-    return null;
   }
 
-  static Future<BookModel?> fetchBookDetailByIsbn(String isbn) async {
-    final url = Uri.parse('https://www.aladin.co.kr/ttb/api/ItemLookUp.aspx'
-        '?ttbkey=$_apiKey' // 🔧 통일: 위에서 정의한 _apiKey 사용
-        '&itemIdType=ISBN'
-        '&ItemId=$isbn'
-        '&output=JS'
-        '&Version=20131101');
+  /// ISBN13으로 YES24 도서 상세정보 조회
+  static Future<BookModel?> fetchBookDetailByIsbn(
+    String isbn,
+  ) async {
+    final normalizedIsbn = isbn.replaceAll(RegExp(r'[^0-9Xx]'), '').trim();
 
-    //debugPrint("📘 [API 요청] 상세조회 by ISBN: $isbn");
+    // 현재 서버 함수는 ISBN13 전용
+    if (normalizedIsbn.length != 13) {
+      debugPrint(
+        '지원하지 않는 ISBN 형식: $normalizedIsbn',
+      );
+      return null;
+    }
 
-    final response = await http.get(url);
+    try {
+      final yes24 = await Yes24BookService.findByIsbn(
+        normalizedIsbn,
+      );
 
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      final items = data['item'] as List<dynamic>? ?? [];
-      if (items.isNotEmpty) {
-        final item = items[0];
-        //debugPrintLongText('[📦 ISBN 상세조회 데이터] ${jsonEncode(item)}');
-
-        final coverUrl = item['cover'] ?? '';
-        //debugPrint('[📷 표지 이미지 URL] $coverUrl');
-
-        final book = BookModel.fromAladinApi(item);
-        //debugPrint("📘 [최종 BookModel] title: ${book.title}, pageCount: ${book.pageCount}");
-        return book;
+      if (!yes24.found || yes24.title == null || yes24.title!.trim().isEmpty) {
+        return null;
       }
-    } else {
-      debugPrint("❌ [API 오류] 상태 코드: ${response.statusCode}");
-    }
 
-    return null;
+      // 다른 판본으로 잘못 조회되는 상황 방지
+      if (yes24.isbn13 != normalizedIsbn) {
+        debugPrint(
+          'YES24 ISBN 불일치: $normalizedIsbn',
+        );
+        return null;
+      }
+
+      final title = yes24.title!.trim();
+      final author = yes24.author?.trim() ?? '';
+
+      return BookModel(
+        id: generateBookId(
+          normalizedIsbn,
+          title,
+          author,
+        ),
+        title: title,
+        author: author,
+        publisher: yes24.publisher,
+        isbn: normalizedIsbn,
+
+        // YES24 앞표지와 도서 소개
+        description: yes24.description,
+        imageUrl: yes24.coverUrl,
+
+        // 알라딘 상품 ID는 사용하지 않음
+        itemId: null,
+
+        // YES24 상품 ID 및 책등
+        yes24ItemId: yes24.itemId,
+        spineUrl: yes24.spineUrl,
+        spineChecked: true,
+
+        // YES24 페이지수
+        pageCount: yes24.pageCount,
+
+        pageRead: 0,
+        rereadCount: 1,
+        category: 'want',
+        customLibraries: const [],
+      );
+    } catch (e, stackTrace) {
+      debugPrint(
+        'YES24 ISBN 상세 조회 실패: $e',
+      );
+      debugPrint('$stackTrace');
+      return null;
+    }
   }
 
-  /// 📚 requiredBooks 리스트 기반 상세 정보 묶음 조회
-  static Future<List<BookModel>> fetchRequiredBooksFromApi(List<BookModel> books) async {
-    final List<BookModel> result = [];
+  /// 챌린지 지정 도서의 상세정보 보강
+  ///
+  /// 기존 BookModel을 유지하면서
+  /// YES24에서 가져온 도서 정보만 반영한다.
+  static Future<List<BookModel>> fetchRequiredBooksFromApi(
+    List<BookModel> books,
+  ) async {
+    final result = <BookModel>[];
 
     for (final book in books) {
       BookModel? fetched;
 
-      final isbn = book.isbn;
-      final itemId = book.itemId;
+      final isbn = book.isbn?.trim();
 
-      // 1. ISBN → 2. itemId → 3. title+author
+      // 1. ISBN으로 정확한 판본 조회
       if (isbn != null && isbn.isNotEmpty) {
         fetched = await fetchBookDetailByIsbn(isbn);
-        //debugPrint("📕 ISBN으로 검색 시도: ${book.title} → ${fetched != null ? '성공' : '실패'}");
       }
 
-      if (fetched == null && itemId != null && itemId.isNotEmpty) {
-        fetched = await fetchBookDetail(itemId);
-        //debugPrint("📘 itemId로 검색 시도: ${book.title} → ${fetched != null ? '성공' : '실패'}");
-      }
-
-      // 🔥 마지막 fallback: 네이버 title + author 검색
+      // 2. ISBN 조회 실패 시 제목 + 저자 검색
       if (fetched == null) {
-        final query = "${book.title} ${book.author}";
-        fetched = await fetchBookFromNaver(query);
-        //debugPrint("📗 제목+저자 검색 시도: $query → ${fetched != null ? '성공' : '실패'}");
+        final query = [
+          book.title,
+          book.author,
+        ]
+            .where(
+              (value) => value.trim().isNotEmpty,
+            )
+            .join(' ');
+
+        if (query.isNotEmpty) {
+          final searchedBooks = await searchBooks(
+            query,
+            maxResults: 1,
+          );
+
+          if (searchedBooks.isNotEmpty) {
+            final candidate = searchedBooks.first;
+
+            // ISBN이 있으면 반드시 동일한 ISBN일 때만 반영
+            if (isbn == null || isbn.isEmpty || candidate.isbn == isbn) {
+              fetched = candidate;
+            }
+          }
+        }
       }
 
       if (fetched != null) {
-        result.add(fetched.copyWith(id: book.id)); // 기존 ID 유지
+        result.add(
+          book.copyWith(
+            title: fetched.title.isNotEmpty ? fetched.title : book.title,
+            author: fetched.author.isNotEmpty ? fetched.author : book.author,
+            publisher: (fetched.publisher?.isNotEmpty ?? false)
+                ? fetched.publisher
+                : book.publisher,
+            isbn:
+                (fetched.isbn?.isNotEmpty ?? false) ? fetched.isbn : book.isbn,
+            description: (fetched.description?.isNotEmpty ?? false)
+                ? fetched.description
+                : book.description,
+            imageUrl: (fetched.imageUrl?.isNotEmpty ?? false)
+                ? fetched.imageUrl
+                : book.imageUrl,
+
+            // 기존 독서 기록의 페이지수는 우선 보존
+            pageCount: book.pageCount > 0 ? book.pageCount : fetched.pageCount,
+
+            // 기존 알라딘 ID는 데이터 호환을 위해 보존
+            itemId: fetched.itemId ?? book.itemId,
+
+            // YES24 정보
+            yes24ItemId: fetched.yes24ItemId ?? book.yes24ItemId,
+            spineUrl: fetched.spineUrl ?? book.spineUrl,
+          ),
+        );
       } else {
-        //debugPrint("❌ 최종 실패: ${book.title} (${book.isbn ?? 'isbn 없음'})");
-        result.add(book); // 최소한 원본은 유지
+        // 도서 정보를 조회하지 못하면 기존 값 유지
+        result.add(book);
       }
     }
 
     return result;
   }
 
-  static Future<BookModel?> fetchBookFromNaver(String query) async {
-    final uri = Uri.https(
-      'openapi.naver.com',
-      '/v1/search/book.json',
-      {
-        'query': query,
-        'display': '1',
-      },
+  /// 기존 검색 화면 호출부 호환용
+  static Future<List<BookModel>> searchBooksCombined(
+    String query,
+  ) {
+    return searchBooks(
+      query,
+      maxResults: 15,
+    );
+  }
+
+  /// 기존 호출부 호환용
+  ///
+  /// 함수명은 과거 네이버 API에서 사용한 이름이지만
+  /// 실제 데이터 조회는 YES24에서 수행한다.
+  @Deprecated(
+    '네이버 책 API 종료. '
+    'searchBooks 또는 fetchBookDetailByIsbn 사용',
+  )
+  static Future<BookModel?> fetchBookFromNaver(
+    String query,
+  ) async {
+    final books = await searchBooks(
+      query,
+      maxResults: 1,
     );
 
-    final response = await http.get(uri, headers: {
-      'X-Naver-Client-Id': _naverClientId,
-      'X-Naver-Client-Secret': _naverClientSecret,
-    });
-
-    if (response.statusCode == 200) {
-      final data = json.decode(utf8.decode(response.bodyBytes));
-      final items = data['items'] as List<dynamic>;
-      if (items.isNotEmpty) {
-        return BookModel.fromNaverApi(items[0]);
-      }
-    } else {
-      debugPrint('❌ 네이버 API 실패: ${response.statusCode}');
+    if (books.isEmpty) {
+      return null;
     }
 
-    return null;
+    return books.first;
   }
 
-  /// 🔍 네이버 + 알라딘 검색 통합 함수
-  static Future<List<BookModel>> searchBooksCombined(String query) async {
-    final List<BookModel> finalList = [];
-
+  /// YES24 종합 베스트셀러 TOP 10 조회
+  static Future<List<BookModel>> fetchBestsellers() async {
     try {
-      // 1. 네이버에서 최대 10권 검색
-      final naverUri = Uri.https(
-        'openapi.naver.com',
-        '/v1/search/book.json',
-        {
-          'query': query,
-          'display': '10',
-        },
+      final data = await Yes24BookService.fetchBestsellers();
+
+      final books = <BookModel>[];
+
+      for (final item in data) {
+        final title = item['title']?.toString().trim() ?? '';
+        final author = item['author']?.toString().trim() ?? '';
+        final isbn = item['isbn13']?.toString().trim() ?? '';
+
+        if (title.isEmpty) {
+          continue;
+        }
+
+        final pageCount = int.tryParse(
+              item['pageCount']?.toString() ?? '',
+            ) ??
+            0;
+
+        books.add(
+          BookModel(
+            id: generateBookId(
+              isbn.isEmpty ? null : isbn,
+              title,
+              author,
+            ),
+            title: title,
+            author: author,
+            publisher: item['publisher']?.toString(),
+            isbn: isbn.isEmpty ? null : isbn,
+            description: item['description']?.toString(),
+            imageUrl: item['coverUrl']?.toString(),
+
+            // 알라딘 상품 ID는 사용하지 않음
+            itemId: null,
+
+            // YES24 상품 ID
+            yes24ItemId: item['yes24ItemId']?.toString(),
+
+            pageCount: pageCount > 0 ? pageCount : 0,
+            pageRead: 0,
+            rereadCount: 1,
+            category: 'want',
+            customLibraries: const [],
+          ),
+        );
+      }
+
+      debugPrint(
+        'YES24 베스트셀러 조회 성공: ${books.length}권',
       );
 
-      final naverResponse = await http.get(naverUri, headers: {
-        'X-Naver-Client-Id': _naverClientId,
-        'X-Naver-Client-Secret': _naverClientSecret,
-      });
-
-      if (naverResponse.statusCode == 200) {
-        final data = json.decode(utf8.decode(naverResponse.bodyBytes));
-        final items = data['items'] as List<dynamic>;
-
-        for (var item in items) {
-          final naverBook = BookModel.fromNaverApi(item);
-
-          BookModel mergedBook = naverBook;
-
-          // 2. 알라딘에서 pageCount 보충 (ISBN 기반)
-          if (naverBook.isbn != null && naverBook.isbn!.isNotEmpty) {
-            final detail = await fetchBookDetailByIsbn(naverBook.isbn!);
-            if (detail != null) {
-              mergedBook = naverBook.merge(detail);
-            }
-          }
-
-          finalList.add(mergedBook);
-        }
-      } else {
-        debugPrint('❌ 네이버 API 실패: ${naverResponse.statusCode}');
-      }
-    } catch (e) {
-      debugPrint('❌ 네이버 검색 예외: $e');
+      return books;
+    } catch (e, stackTrace) {
+      debugPrint(
+        'YES24 베스트셀러 조회 실패: $e',
+      );
+      debugPrint('$stackTrace');
+      return [];
     }
-
-    return finalList;
   }
 
-  static Future<List<BookModel>> fetchBestsellersWithNaverData() async {
-    final url = Uri.parse("https://www.aladin.co.kr/ttb/api/ItemList.aspx"
-        "?ttbkey=$_apiKey"
-        "&QueryType=Bestseller"
-        "&MaxResults=10"
-        "&start=1"
-        "&SearchTarget=Book"
-        "&output=js"
-        "&Version=20131101");
+  /// 여러 ISBN을 순차적으로 YES24에서 조회
+  static Future<List<BookModel>> fetchBooksByIsbnList(
+    List<String> isbns,
+  ) async {
+    final result = <BookModel>[];
 
-    final response = await http.get(url);
-
-    if (response.statusCode != 200) {
-      throw Exception("📛 베스트셀러 불러오기 실패: ${response.statusCode}");
-    }
-
-    final json = jsonDecode(response.body);
-    final items = (json['item'] as List).cast<Map<String, dynamic>>();
-    final List<BookModel> result = [];
-
-    for (final item in items) {
-      final isbn = item["isbn13"] ?? item["isbn"];
-      if (isbn == null || isbn.isEmpty) continue;
-
-      try {
-        // 1. 알라딘 정보 먼저 가져옴 (pageCount 포함)
-        final aladinBook = BookModel.fromAladinApi(item);
-
-        // 2. 네이버 API로 정보 조회 (title, author, description, etc)
-        final naverBook = await fetchBookFromNaver(isbn);
-
-        if (naverBook != null) {
-          // ✅ 알라딘 기준으로 네이버 덮어쓰기
-          final merged = aladinBook.merge(naverBook);
-          result.add(merged);
-        } else {
-          result.add(aladinBook);
-        }
-      } catch (e) {
-        debugPrint("❌ 베스트셀러 처리 실패 ($isbn): $e");
-      }
-    }
-
-    return result;
-  }
-
-  /// ✅ 여러 ISBN을 한 번에 상세 조회
-  static Future<List<BookModel>> fetchBooksByIsbnList(List<String> isbns) async {
-    final List<BookModel> result = [];
     for (final isbn in isbns) {
       try {
         final book = await fetchBookDetailByIsbn(isbn);
-        if (book != null) result.add(book);
+
+        if (book != null) {
+          result.add(book);
+        }
       } catch (e) {
-        debugPrint('⚠️ ISBN $isbn 조회 실패: $e');
+        debugPrint(
+          'ISBN $isbn 조회 실패: $e',
+        );
       }
     }
+
     return result;
   }
-
 }
-// 📂

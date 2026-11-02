@@ -10,7 +10,7 @@ import 'package:dayverse_book/service/book_api_service.dart';
 import 'package:dayverse_book/utils/book_utils.dart';
 import 'package:dayverse_book/utils/challenge_check_utils.dart';
 import 'package:dayverse_book/widget/book_search_dialog.dart';
-import 'package:dayverse_book/widget/definded_book_selection.dart';
+import 'package:dayverse_book/widget/challenge_book_selection_dialog.dart';
 import 'package:flutter/cupertino.dart';
 
 class ReadingIntroScreen extends StatefulWidget {
@@ -65,7 +65,7 @@ class _ReadingIntroScreenState extends State<ReadingIntroScreen> {
 
       final selected = await showDialog<BookModel>(
         context: context,
-        builder: (_) => DefinedBookSelection(
+        builder: (_) => ChallengeBookSelectionDialog(
           books: candidates, // ✅ 여기만 변경
           savedBooks: context.read<SavedBooksProvider>().savedBooks,
         ),
@@ -119,13 +119,30 @@ class _ReadingIntroScreenState extends State<ReadingIntroScreen> {
 
     BookModel book = selectedBook!;
 
-    // 🔍 상세 정보 가져오기
-    if (book.pageCount == 0 && book.itemId != null) {
-      final detailed = await BookApiService.fetchBookDetail(book.itemId!);
-      if (detailed != null) {
-        book = detailed;
+
+    // 페이지수가 없다면 YES24 ISBN 상세 조회로 보완
+    final isbn = book.isbn?.trim();
+
+    if (book.pageCount <= 0 &&
+        isbn != null &&
+        isbn.replaceAll(RegExp(r'[^0-9Xx]'), '').length == 13) {
+      try {
+        final detailed =
+        await BookApiService.fetchBookDetailByIsbn(isbn);
+
+        if (detailed != null && detailed.pageCount > 0) {
+          // 기존 도서 정보는 유지하고 페이지수만 갱신
+          book = book.copyWith(
+            pageCount: detailed.pageCount,
+          );
+        }
+      } catch (e) {
+        debugPrint('[독서 시작 페이지수 조회 실패] $e');
       }
     }
+
+    if (!mounted) return;
+
 
     // 🟢 BookModel 보강 (startDate, category 등)
     book = book.copyWith(
@@ -152,64 +169,55 @@ class _ReadingIntroScreenState extends State<ReadingIntroScreen> {
     final screenHeight = MediaQuery.of(context).size.height;
     final screenWidth = MediaQuery.of(context).size.width;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF0A1D27),
-      bottomNavigationBar: _buildBottomNavBar(context),
-      body: Stack(
-        children: [
-          SizedBox(
-            height: screenHeight,
-            width: screenWidth,
-            child: Image.asset(
-              'assets/image/diving.webp',
-              fit: BoxFit.cover,
-              gaplessPlayback: true,
-            ),
-          ),
-          SafeArea(
-            child: Center(
-              child: Column(
-                children: [
-                  SizedBox(height: screenHeight * 0.06),
-                  _buildIntroTextSection(screenWidth),
-                  const Spacer(),
-                  ElevatedButton(
-                    onPressed: selectedBook == null ? _openBookSearchDialog : _startReading,
-                    style: ElevatedButton.styleFrom(
-                      shape: const CircleBorder(),
-                      padding: EdgeInsets.all(screenWidth * 0.08),
-                      backgroundColor: Colors.white24,
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.play_arrow, size: screenWidth * 0.1, color: Colors.amberAccent),
-                        SizedBox(height: screenHeight * 0.005),
-                        Text(
-                          "시작",
-                          style: TextStyle(
-                            fontSize: screenWidth * 0.04,
-                            color: Colors.amberAccent,
-                            fontFamily: 'Kopub',
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  SizedBox(height: screenHeight * 0.05),
-                ],
+    return GestureDetector(
+      onHorizontalDragEnd: (details) {
+        final velocity =
+            details.primaryVelocity ?? 0;
+
+        if (velocity > 500) {
+          Navigator.pop(context);
+        }
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFF0A1D27),
+        body: Stack(
+          children: [
+            Positioned.fill(
+              child: Image.asset(
+                'assets/image/diving.webp',
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
               ),
             ),
-          ),
-          if (selectedBook != null)
-            Positioned(
-              top: screenHeight * 0.25,
-              left: 0,
-              right: 0,
-              child: Center(child: _buildBookInfoCard(selectedBook!, screenWidth)),
+
+            _buildBackButton(context),
+
+            SafeArea(
+              child: Center(
+                child: Column(
+                  children: [
+                    SizedBox(height: screenHeight * 0.02),
+                    _buildIntroTextSection(screenWidth),
+                    const Spacer(),
+                    _buildStartButton(
+                      w: screenWidth,
+                      h: screenHeight,
+                      onTap: selectedBook == null ? _openBookSearchDialog : _startReading,
+                    ),
+                    SizedBox(height: screenHeight * 0.05),
+                  ],
+                ),
+              ),
             ),
-        ],
+            if (selectedBook != null)
+              Positioned(
+                top: screenHeight * 0.25,
+                left: 0,
+                right: 0,
+                child: Center(child: _buildBookInfoCard(selectedBook!, screenWidth)),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -231,7 +239,7 @@ class _ReadingIntroScreenState extends State<ReadingIntroScreen> {
           ),
           textAlign: TextAlign.center,
         ),
-        SizedBox(height: screenWidth * 0.02),
+        SizedBox(height: screenWidth * 0.03),
         Text(
           "깊은 몰입을 위해 스마트폰은 잠시 멀리 두세요!",
           style: TextStyle(
@@ -243,21 +251,40 @@ class _ReadingIntroScreenState extends State<ReadingIntroScreen> {
         ),
         SizedBox(height: screenWidth * 0.04),
         Container(
-          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 20),
-          decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.35),
-            borderRadius: BorderRadius.circular(12),
+          padding: EdgeInsets.symmetric(
+            horizontal: screenWidth * 0.06,
+            vertical: screenWidth * 0.03,
           ),
-          child: Text(
-            "오늘의 독서 시간: ${todayMinutes}분",
-            style: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              fontFamily: 'kopub',
-              color: Colors.amberAccent,
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.24),
+            borderRadius: BorderRadius.circular(30),
+            border: Border.all(
+              color: Colors.white.withOpacity(0.10),
             ),
           ),
-        ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.schedule_rounded,
+                color: Colors.amberAccent,
+                size: screenWidth * 0.038,
+              ),
+              SizedBox(
+                width: screenWidth * 0.015,
+              ),
+              Text(
+                '오늘 $todayMinutes분 읽었어요',
+                style: TextStyle(
+                  fontSize: screenWidth * 0.03,
+                  fontWeight: FontWeight.w600,
+                  fontFamily: 'kopub',
+                  color: Colors.amberAccent,
+                ),
+              ),
+            ],
+          ),
+        )
       ],
     );
   }
@@ -342,70 +369,125 @@ class _ReadingIntroScreenState extends State<ReadingIntroScreen> {
     );
   }
 
-  Widget _buildBox(double screenWidth, Widget child) {
+  Widget _buildBox(
+      double screenWidth,
+      Widget child,
+      ) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      margin: EdgeInsets.symmetric(horizontal: screenWidth * 0.15),
+      padding: EdgeInsets.all(
+        screenWidth * 0.04,
+      ),
+      margin: EdgeInsets.symmetric(
+        horizontal: screenWidth * 0.18,
+      ),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(16),
+        color: Colors.black.withOpacity(0.24),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: Colors.white.withOpacity(0.12),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.18),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
       ),
       child: child,
     );
   }
 
-  Widget _buildBottomNavBar(BuildContext context) {
-    // 디바이스 하단 inset 체크
-    final bottomInset = MediaQuery.of(context).padding.bottom;
+  Widget _buildBackButton(BuildContext context) {
+    final topPadding = MediaQuery.of(context).padding.top;
 
-    // 삼성 3버튼 내비바처럼 "진짜로 높은 바"만 존중하고,
-    // 픽셀/에뮬레이터의 얇은 제스처 인셋은 무시해서 안 띄우게
-    final effectiveBottomInset = bottomInset >= 16 ? bottomInset : 0.0;
-
-    return Container(
-      padding: EdgeInsets.only(
-        top: 12,
-        bottom: 12 + effectiveBottomInset,
-      ),
-      decoration: const BoxDecoration(
-        color: Color(0xFF01241c),
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(20),
-          topRight: Radius.circular(20),
+    return Positioned(
+      top: topPadding + 12,
+      left: 16,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () => Navigator.pop(context),
+          borderRadius: BorderRadius.circular(999),
+          child: Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.42),
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: Colors.white.withOpacity(0.18),
+                width: 1,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.28),
+                  blurRadius: 14,
+                  offset: const Offset(0, 6),
+                ),
+              ],
+            ),
+            child: const Icon(
+              Icons.arrow_back_ios_new_rounded,
+              color: Colors.white,
+              size: 18,
+            ),
+          ),
         ),
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: List.generate(5, (index) {
-          final icons = [
-            Icons.home_filled,
-            Icons.shelves,
-            Icons.local_fire_department,
-            Icons.bar_chart,
-            Icons.menu,
-          ];
-          return _buildNavItem(context, icons[index], index);
-        }),
+    );
+  }
+
+  Widget _buildStartButton({
+    required double w,
+    required double h,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        // 기존 0.2 → 0.22로 사이즈만 확대
+        width: w * 0.22,
+        height: w * 0.22,
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.22),
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: Colors.white.withOpacity(0.85),
+            width: 1.4,
+          ),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              selectedBook == null
+                  ? Icons.auto_stories_outlined
+                  : Icons.play_arrow_rounded,
+              color: Colors.amberAccent,
+              size: w * 0.075,
+            ),
+            SizedBox(
+              height: h * 0.004,
+            ),
+            Text(
+              selectedBook == null
+                  ? "선택"
+                  : "시작",
+              style: TextStyle(
+                fontSize: w * 0.032,
+                color: Colors.amberAccent,
+                fontFamily: 'Kopub',
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildNavItem(BuildContext context, IconData icon, int index) {
-    return GestureDetector(
-      onTap: () {
-        Navigator.pushAndRemoveUntil(
-          context,
-          MaterialPageRoute(builder: (_) => MainScreen(initialTabIndex: index)),
-              (route) => false,
-        );
-      },
-      child: Padding(
-        padding: const EdgeInsets.all(8),
-        child: Icon(icon, color: Colors.grey[500], size: 28),
-      ),
-    );
-  }
 }
 
 
